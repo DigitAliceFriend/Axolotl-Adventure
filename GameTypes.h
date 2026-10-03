@@ -38,7 +38,7 @@ struct Note { uint16_t f; uint16_t ms; };   // f = 0 means a short silence
 struct Skin {
   const char* name;
   uint16_t body, belly, gill, eye;
-  bool rainbow;
+  uint8_t rainbow;      // 0 = normal, 1 = bright rainbow, 2 = dark rainbow
 };
 
 // Speed setting (the same for every level)
@@ -52,6 +52,7 @@ struct Profile {
   uint8_t  unlocked;    // how many skins are unlocked (1 = just the first)
   uint16_t level;       // the level this player plays next
   uint32_t best;        // best score in one run
+  uint8_t  seen;        // skins the player has already looked at (for "NEW!" badges)
 };
 
 // Leaderboard entry

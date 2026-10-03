@@ -39,6 +39,11 @@
 #define LED_B_PIN     17
 #define BACKLIGHT_PIN 21
 
+// Screen dims after this long without a touch on a menu (saves battery)
+#define DIM_AFTER_MS  60000
+#define BRIGHT_FULL   255
+#define BRIGHT_DIM    20
+
 // ---------------- Touch calibration ----------------
 // If touches feel "off", set TOUCH_DEBUG to 1. A red dot shows where the
 // CYD thinks you touched, plus the raw numbers. Adjust the MIN/MAX values.
@@ -90,8 +95,6 @@ constexpr uint16_t RGB(uint8_t r, uint8_t g, uint8_t b) {
 }
 const uint16_t C_WHITE       = RGB(255, 255, 255);
 const uint16_t C_BLACK       = 0;
-const uint16_t C_SAND        = RGB(240, 210, 140);
-const uint16_t C_SAND_DARK   = RGB(200, 165, 100);
 const uint16_t C_PEBBLE      = RGB(165, 135, 95);
 const uint16_t C_ROCK        = RGB(130, 130, 145);
 const uint16_t C_ROCK_LIGHT  = RGB(190, 190, 205);
@@ -99,7 +102,6 @@ const uint16_t C_ROCK_DARK   = RGB(80, 80, 100);
 const uint16_t C_MOSS        = RGB(90, 185, 90);
 const uint16_t C_WEED        = RGB(40, 195, 80);
 const uint16_t C_WEED_DARK   = RGB(20, 140, 60);
-const uint16_t C_HILL        = RGB(20, 90, 125);
 const uint16_t C_BUBBLE      = RGB(200, 240, 255);
 const uint16_t C_HEART       = RGB(255, 60, 90);
 const uint16_t C_GOLD        = RGB(255, 215, 40);
@@ -116,24 +118,40 @@ const uint16_t C_ORANGE_BTN  = RGB(240, 130, 30);
 const uint16_t C_TEAL_BTN    = RGB(20, 150, 160);
 const uint16_t C_RED_BTN     = RGB(210, 60, 60);
 const uint16_t C_GREY_BTN    = RGB(110, 110, 125);
-const uint16_t WATER[6] = { RGB(120, 215, 240), RGB(90, 195, 230), RGB(60, 170, 220),
-                            RGB(40, 145, 205),  RGB(30, 120, 185), RGB(20, 95, 165) };
+// Each level gets a new underwater place (looks only - the speed never changes)
+struct Theme { const char* name; uint16_t water[6]; uint16_t hill, sand, sandDark; };
+const Theme THEMES[4] = {
+  {"Sunny Lagoon", {RGB(120, 215, 240), RGB(90, 195, 230), RGB(60, 170, 220), RGB(40, 145, 205), RGB(30, 120, 185), RGB(20, 95, 165)},
+   RGB(20, 90, 125), RGB(240, 210, 140), RGB(200, 165, 100)},
+  {"Coral Reef",   {RGB(110, 225, 215), RGB(80, 205, 200), RGB(55, 180, 190), RGB(40, 155, 175), RGB(30, 130, 160), RGB(20, 105, 145)},
+   RGB(230, 110, 130), RGB(250, 225, 170), RGB(215, 180, 120)},
+  {"Sunset Bay",   {RGB(255, 190, 140), RGB(240, 160, 150), RGB(200, 130, 170), RGB(150, 105, 180), RGB(100, 85, 170), RGB(60, 60, 150)},
+   RGB(70, 50, 120), RGB(235, 195, 150), RGB(195, 150, 110)},
+  {"Deep Sea",     {RGB(40, 90, 160), RGB(30, 75, 140), RGB(25, 60, 120), RGB(20, 48, 100), RGB(15, 38, 85), RGB(10, 28, 70)},
+   RGB(20, 40, 75), RGB(150, 140, 120), RGB(115, 105, 90)},
+};
 const uint16_t FISH_COLORS[3] = { RGB(255, 140, 40), RGB(255, 220, 50), RGB(190, 110, 235) };
 
 // ---------------- Skins ----------------
 // The first skin is free. Finishing level N unlocks skin number N+1.
 const Skin SKINS[] = {
-  {"Pinky",    RGB(255, 160, 190), RGB(255, 215, 230), RGB(235, 70, 130),  C_BLACK,           false},
-  {"Goldie",   RGB(255, 205, 70),  RGB(255, 240, 170), RGB(255, 120, 30),  C_BLACK,           false},
-  {"Wild",     RGB(105, 120, 70),  RGB(160, 175, 110), RGB(75, 60, 35),    RGB(230, 190, 40), false},
-  {"Sky",      RGB(90, 150, 255),  RGB(175, 205, 255), RGB(40, 70, 200),   C_BLACK,           false},
-  {"Minty",    RGB(110, 225, 160), RGB(200, 255, 220), RGB(30, 150, 90),   C_BLACK,           false},
-  {"Magenta",  RGB(235, 60, 190),  RGB(255, 160, 225), RGB(160, 20, 130),  C_BLACK,           false},
-  {"Cyan",     RGB(60, 220, 235),  RGB(180, 245, 250), RGB(0, 140, 170),   C_BLACK,           false},
-  {"Lavender", RGB(190, 160, 240), RGB(225, 210, 255), RGB(140, 90, 210),  C_BLACK,           false},
-  {"White",    RGB(245, 245, 250), RGB(220, 225, 240), RGB(255, 140, 170), C_BLACK,           false},
-  {"Midnight", RGB(90, 60, 165),   RGB(150, 120, 220), RGB(255, 120, 220), C_WHITE,           false},
-  {"Rainbow",  0, 0, 0,                                                     C_BLACK,           true},
+  {"Pinky",    RGB(255, 160, 190), RGB(255, 215, 230), RGB(235, 70, 130),  C_BLACK,           0},  // free
+  {"Goldie",   RGB(255, 205, 70),  RGB(255, 240, 170), RGB(255, 120, 30),  C_BLACK,           0},  // level 1
+  {"Wild",     RGB(105, 120, 70),  RGB(160, 175, 110), RGB(75, 60, 35),    RGB(230, 190, 40), 0},  // level 2
+  {"Sky",      RGB(90, 150, 255),  RGB(175, 205, 255), RGB(40, 70, 200),   C_BLACK,           0},  // level 3
+  {"Minty",    RGB(110, 225, 160), RGB(200, 255, 220), RGB(30, 150, 90),   C_BLACK,           0},  // level 4
+  {"Magenta",  RGB(235, 60, 190),  RGB(255, 160, 225), RGB(160, 20, 130),  C_BLACK,           0},  // level 5
+  {"Cyan",     RGB(60, 220, 235),  RGB(180, 245, 250), RGB(0, 140, 170),   C_BLACK,           0},  // level 6
+  {"Lavender", RGB(190, 160, 240), RGB(225, 210, 255), RGB(140, 90, 210),  C_BLACK,           0},  // level 7
+  {"White",    RGB(245, 245, 250), RGB(220, 225, 240), RGB(255, 140, 170), C_BLACK,           0},  // level 8
+  {"Midnight", RGB(90, 60, 165),   RGB(150, 120, 220), RGB(255, 120, 220), C_WHITE,           0},  // level 9
+  {"Rainbow",  0, 0, 0,                                                     C_BLACK,           1},  // level 10
+  {"Ruby",     RGB(230, 50, 50),   RGB(255, 140, 130), RGB(150, 15, 30),   C_BLACK,           0},  // level 11 (red)
+  {"Lemon",    RGB(255, 240, 60),  RGB(255, 250, 180), RGB(240, 175, 0),   C_BLACK,           0},  // level 12 (yellow)
+  {"Cloud",    RGB(200, 200, 210), RGB(235, 235, 242), RGB(140, 145, 170), C_BLACK,           0},  // level 13 (light gray)
+  {"Shadow",   RGB(25, 25, 32),    RGB(55, 55, 68),    RGB(95, 65, 120),   RGB(235, 195, 40), 0},  // level 14 (deep black)
+  {"Forest",   RGB(30, 100, 50),   RGB(70, 145, 85),   RGB(15, 60, 30),    RGB(235, 195, 40), 0},  // level 15 (dark green)
+  {"Twilight", 0, 0, 0,                                                     C_WHITE,           2},  // level 16 (dark rainbow)
 };
 const int N_SKINS = sizeof(SKINS) / sizeof(SKINS[0]);
 
@@ -177,6 +195,12 @@ const Note SND_SQUEAK[]    = {{1500, 40}, {2000, 40}, {1700, 60}};
   #define SPK_CH 0                // core 2.x uses a channel number
 #endif
 
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  #define BL_CH BACKLIGHT_PIN
+#else
+  #define BL_CH 1
+#endif
+
 volatile uint8_t  volume = 2;             // 0 off, 1 quiet, 2 loud
 portMUX_TYPE      sndMux = portMUX_INITIALIZER_UNLOCKED;
 const Note*       sndReqSeq = nullptr;
@@ -192,6 +216,16 @@ void speakerInit() {
   ledcAttachPin(SPEAKER_PIN, SPK_CH);
 #endif
   ledcWrite(SPK_CH, 0);
+}
+
+void backlightInit() {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttach(BACKLIGHT_PIN, 5000, 8);
+#else
+  ledcSetup(BL_CH, 5000, 8);
+  ledcAttachPin(BACKLIGHT_PIN, BL_CH);
+#endif
+  ledcWrite(BL_CH, BRIGHT_FULL);
 }
 
 void speakerTone(uint16_t f) {
@@ -320,12 +354,13 @@ float readyT = 0, overT = 0, wiggleT = 0;
 int   levelScore = 0, runScore = 0, curLevel = 1, lives = 3;
 int   mode = 0, browse = 0, readyCount = -1, wormsUntilTrophy = 100;
 int   overRank = -1, confirmIdx = -1;
-bool  runActive = false, newRecord = false, deleteMode = false;
+bool  runActive = false, newRecord = false, deleteMode = false, quitArmed = false;
 const char* overMsg = "";
 const char* newSkinName = nullptr;
 char  nameBuf[NAME_LEN + 1];
 int   nameLen = 0;
-uint32_t lastMs = 0;
+uint32_t lastMs = 0, lastActivityMs = 0;
+bool  dimmed = false;
 
 // ============================================================
 //   SAVED DATA  (players + leaderboard)
@@ -354,6 +389,7 @@ void loadSaved() {
     if (p.unlocked < 1) p.unlocked = 1;
     if (p.unlocked > N_SKINS) p.unlocked = N_SKINS;
     if (p.skin >= p.unlocked) p.skin = 0;
+    if (p.seen > p.unlocked) p.seen = p.unlocked;
     if (p.level < 1) p.level = 1;
   }
   memset(scores, 0, sizeof(scores));
@@ -401,6 +437,19 @@ uint16_t pastelHue(float h) {
   }
   r = 0.35f + 0.65f * r; g = 0.35f + 0.65f * g; b = 0.35f + 0.65f * b;
   return RGB((uint8_t)(r * 255), (uint8_t)(g * 255), (uint8_t)(b * 255));
+}
+
+// Deep, jewel-toned version of the rainbow (for the "Twilight" skin)
+uint16_t darkHue(float h, float bright) {
+  uint16_t c = pastelHue(h);
+  // turn the pastel back into full colour, then darken it
+  float r = (((c >> 11) & 0x1F) / 31.0f - 0.35f) / 0.65f;
+  float g = (((c >> 5) & 0x3F) / 63.0f - 0.35f) / 0.65f;
+  float b = ((c & 0x1F) / 31.0f - 0.35f) / 0.65f;
+  r = constrain(r, 0.0f, 1.0f); g = constrain(g, 0.0f, 1.0f); b = constrain(b, 0.0f, 1.0f);
+  return RGB((uint8_t)((0.08f + 0.5f * r) * 255 * bright),
+             (uint8_t)((0.08f + 0.5f * g) * 255 * bright),
+             (uint8_t)((0.08f + 0.5f * b) * 255 * bright));
 }
 
 void textAt(const char* s, int x, int y, int font, uint16_t col, uint8_t datum) {
@@ -455,6 +504,16 @@ void drawPanel(int x, int y, int w, int h) {
   fb.drawRoundRect(x, y, w, h, 14, C_WHITE);
 }
 
+void drawNewBadge(int x, int y) {
+  fb.fillRoundRect(x, y, 38, 18, 8, C_RED_BTN);
+  fb.drawRoundRect(x, y, 38, 18, 8, C_WHITE);
+  fb.setTextDatum(MC_DATUM);
+  fb.setTextColor(C_WHITE);
+  fb.drawString("NEW!", x + 19, y + 9, 2);
+}
+
+bool hasNewSkins() { return cur >= 0 && P().seen < P().unlocked; }
+
 void drawHeart(int x, int y, int s, uint16_t c) {
   fb.fillCircle(x - s, y, s, c);
   fb.fillCircle(x + s, y, s, c);
@@ -479,11 +538,16 @@ void drawStar(int cx, int cy, int r, uint16_t c) {
 // The star of the show! Facing right. s = scale (1 in game, 2-3 in menus)
 void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = false) {
   uint16_t body = sk.body, belly = sk.belly, gill = sk.gill, eye = sk.eye;
-  if (sk.rainbow) {
+  if (sk.rainbow == 1) {
     float h = fmodf(t * 0.3f, 1.0f);
     body  = pastelHue(h);
     belly = pastelHue(fmodf(h + 0.12f, 1.0f));
     gill  = pastelHue(fmodf(h + 0.5f, 1.0f));
+  } else if (sk.rainbow == 2) {
+    float h = fmodf(t * 0.2f, 1.0f);
+    body  = darkHue(h, 1.0f);
+    belly = darkHue(fmodf(h + 0.12f, 1.0f), 1.4f);
+    gill  = darkHue(fmodf(h + 0.5f, 1.0f), 1.5f);
   }
   if (locked) { body = RGB(60, 70, 95); belly = RGB(80, 90, 115); gill = RGB(45, 55, 80); eye = RGB(30, 35, 50); }
 
@@ -541,22 +605,28 @@ void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = f
   }
 }
 
+int currentTheme() {
+  bool inGame = state == ST_READY || state == ST_PLAY || state == ST_PAUSE || state == ST_CLEAR || state == ST_OVER;
+  return inGame ? (curLevel - 1) % 4 : 0;
+}
+
 void drawBackground() {
+  const Theme& T = THEMES[currentTheme()];
   for (int i = 0; i < 6; i++) {
     int y0 = i * SAND_Y / 6, y1 = (i + 1) * SAND_Y / 6;
-    fb.fillRect(0, y0, W, y1 - y0, WATER[i]);
+    fb.fillRect(0, y0, W, y1 - y0, T.water[i]);
   }
   // far-away hills (slow parallax)
   float s = scrollX * 0.25f;
   for (int x = 0; x < W; x += 4) {
     int h = 16 + (int)(9 * sinf((x + s) * 0.025f) + 5 * sinf((x + s) * 0.071f));
-    fb.fillRect(x, SAND_Y - h, 4, h, C_HILL);
+    fb.fillRect(x, SAND_Y - h, 4, h, T.hill);
   }
   // rising background bubbles
   for (int i = 0; i < MAX_BG; i++) fb.drawCircle((int)bgb[i].x, (int)bgb[i].y, bgb[i].r, C_BUBBLE);
   // sandy floor
-  fb.fillRect(0, SAND_Y, W, H - SAND_Y, C_SAND);
-  fb.fillRect(0, SAND_Y, W, 3, C_SAND_DARK);
+  fb.fillRect(0, SAND_Y, W, H - SAND_Y, T.sand);
+  fb.fillRect(0, SAND_Y, W, 3, T.sandDark);
   for (int i = 0; i < 12; i++) {
     float m = fmodf(i * 47.0f - scrollX, 360.0f);
     if (m < 0) m += 360.0f;
@@ -1072,6 +1142,7 @@ void updateName(float dt) {
       strncpy(p.name, nameBuf, NAME_LEN);
       p.skin = 0;
       p.unlocked = 1;
+      p.seen = 1;
       p.level = 1;
       p.best = 0;
       saveProfile(i);
@@ -1197,6 +1268,7 @@ void drawTitle() {
   drawButton(95, 122, 130, 44, "PLAY", C_GREEN_BTN);
   drawButton(230, 122, 85, 44, "Player", C_BLUE_BTN);
   drawButton2(5, 178, 100, 48, "SKIN", SKINS[P().skin].name, C_PURPLE_BTN);
+  if (hasNewSkins()) drawNewBadge(70, 170);
   drawButton2(110, 178, 100, 48, "SPEED", MODES[mode].name, C_ORANGE_BTN);
   drawButton2(215, 178, 100, 48, "SOUND", VOL_NAMES[volume], C_BLUE_BTN);
 }
@@ -1225,6 +1297,7 @@ void updateSkins(float dt) {
     } else {
       playSound(SND(SND_CLICK));
     }
+    if (P().seen < P().unlocked) { P().seen = P().unlocked; saveProfile(cur); }   // badges cleared
     state = skinReturn;
     lockInput(250);
   }
@@ -1247,6 +1320,7 @@ void drawSkins() {
   drawArrowButton(8, 72, 50, 56, true, C_BLUE_BTN);
   drawArrowButton(262, 72, 50, 56, false, C_BLUE_BTN);
   shadowText(SKINS[browse].name, W / 2, 150, 4, C_WHITE);
+  if (un && browse >= P().seen) drawNewBadge(212, 52);
 
   char buf[32];
   if (!un) {
@@ -1325,7 +1399,8 @@ void drawReady() {
 
   char buf[24];
   snprintf(buf, sizeof(buf), "Level %d", curLevel);
-  shadowText(buf, 160, 58, 4, C_WHITE);
+  shadowText(buf, 160, 50, 4, C_WHITE);
+  shadowText(THEMES[currentTheme()].name, 160, 72, 2, C_WHITE);
   snprintf(buf, sizeof(buf), "Get %d points!", levelGoal(curLevel));
   shadowText(buf, 160, 150, 2, C_GOLD);
 
@@ -1349,6 +1424,7 @@ void updatePlay(float dt) {
   bool onPause = inRect(tx, ty, W - 44, 0, 44, 38);
   if (tPressed && onPause) {
     state = ST_PAUSE;
+    quitArmed = false;
     playSound(SND(SND_CLICK));
     lockInput(250);
     return;
@@ -1363,6 +1439,13 @@ void updatePlay(float dt) {
       else    playSound(SND(SND_DOWN), 0);
     }
     vy += (up ? -SWIM_ACC : SWIM_ACC) * dt;
+    if (random(100) < 20) {        // little bubble trail from the tail
+      for (int i = 0; i < MAX_SPARK; i++) {
+        if (sparks[i].on) continue;
+        sparks[i] = {true, (float)PLAYER_X - 22, py + frand(-3, 3), frand(-30, -10), frand(-70, -40), 0.6f, C_BUBBLE};
+        break;
+      }
+    }
   } else {
     vy -= vy * fminf(1.0f, 3.0f * dt);   // gently glide to a stop
   }
@@ -1439,10 +1522,17 @@ void updatePause() {
     prefs.putUChar("vol", volume);
     playSound(SND(SND_SELECT));
   } else if (inRect(tx, ty, 70, 166, 180, 42)) {
+    if (!quitArmed) {              // first tap: ask to make sure
+      quitArmed = true;
+      playSound(SND(SND_LOCKED));
+      return;
+    }
     playSound(SND(SND_CLICK));
     endRun();
     state = ST_TITLE;
     lockInput(250);
+  } else {
+    quitArmed = false;
   }
 }
 
@@ -1453,8 +1543,9 @@ void drawPause() {
   shadowText("Paused", W / 2, 33, 4, C_GOLD);
   drawButton(70, 52, 180, 42, "Keep Swimming", C_GREEN_BTN);
   drawButton2(55, 104, 100, 48, "SKIN", SKINS[P().skin].name, C_PURPLE_BTN);
+  if (hasNewSkins()) drawNewBadge(120, 96);
   drawButton2(165, 104, 100, 48, "SOUND", VOL_NAMES[volume], C_BLUE_BTN);
-  drawButton(70, 166, 180, 42, "Quit to Menu", C_ORANGE_BTN);
+  drawButton(70, 166, 180, 42, quitArmed ? "Tap again to quit" : "Quit to Menu", quitArmed ? C_RED_BTN : C_ORANGE_BTN);
 }
 
 // ============================================================
@@ -1482,18 +1573,23 @@ void drawClear() {
   drawPanel(40, 30, 240, 185);
   char buf[32];
   snprintf(buf, sizeof(buf), "Level %d", curLevel);
-  shadowText(buf, W / 2, 50, 4, C_GOLD);
-  shadowText("Complete!", W / 2, 76, 4, C_WHITE);
-  for (int k = 0; k < 3; k++) drawStar(120 + k * 40, 106, k == 1 ? 13 : 10, C_GOLD);
+  shadowText(buf, W / 2, 48, 4, C_GOLD);
+  shadowText("Complete!", W / 2, 72, 4, C_WHITE);
+  int yInfo = 132;
   if (newSkinName) {
+    drawStar(88, 112, 10, C_GOLD);
+    drawStar(232, 112, 10, C_GOLD);
+    drawAxolotl(160, 116, 2, overT * 2, SKINS[P().unlocked - 1]);   // show off the new skin
+    yInfo = 140;
     snprintf(buf, sizeof(buf), "New skin: %s!", newSkinName);
-    shadowText(buf, W / 2, 132, 2, C_GOLD);
+    shadowText(buf, W / 2, yInfo, 2, C_GOLD);
   } else {
+    for (int k = 0; k < 3; k++) drawStar(120 + k * 40, 104, k == 1 ? 13 : 10, C_GOLD);
     snprintf(buf, sizeof(buf), "Score: %d", runScore);
-    shadowText(buf, W / 2, 132, 2, C_WHITE);
+    shadowText(buf, W / 2, yInfo, 2, C_WHITE);
   }
   snprintf(buf, sizeof(buf), "Next goal: %d points", levelGoal(curLevel + 1));
-  shadowText(buf, W / 2, 150, 2, C_WHITE);
+  shadowText(buf, W / 2, yInfo + 15, 2, C_WHITE);
   drawButton(55, 165, 100, 40, "Next", C_GREEN_BTN);
   drawButton(165, 165, 100, 40, "Menu", C_BLUE_BTN);
 }
@@ -1552,8 +1648,7 @@ void setup() {
   tft.init();
   tft.setRotation(1);            // landscape; try 3 if the picture is upside down
   tft.fillScreen(TFT_BLACK);
-  pinMode(BACKLIGHT_PIN, OUTPUT);
-  digitalWrite(BACKLIGHT_PIN, HIGH);
+  backlightInit();
 
   touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   touch.begin(touchSPI);
@@ -1590,6 +1685,7 @@ void setup() {
   playSound(SND(SND_START), 2);
   ledFlash(1, 0, 1, 500);
   lastMs = millis();
+  lastActivityMs = lastMs;
 }
 
 void loop() {
@@ -1600,6 +1696,18 @@ void loop() {
 
   readTouch(now);
   ledUpdate(now);
+
+  // dim the screen on menus after a while; the first touch just wakes it
+  if (tDown || state == ST_PLAY || state == ST_READY) lastActivityMs = now;
+  if (dimmed && tDown) {
+    dimmed = false;
+    ledcWrite(BL_CH, BRIGHT_FULL);
+    tPressed = false;
+    lockInput(300);
+  } else if (!dimmed && now - lastActivityMs > DIM_AFTER_MS) {
+    dimmed = true;
+    ledcWrite(BL_CH, BRIGHT_DIM);
+  }
   gameT += dt;
   if (wiggleT > 0) wiggleT -= dt;
 
