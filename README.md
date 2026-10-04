@@ -25,6 +25,32 @@ Dodge 🪨 rocks on the sea floor and hanging from above, 🌿 swaying seaweed, 
 | 🏆 Golden trophy (rare! about once every 50–200 worms) | 20 |
 | 🪨 Swimming past an obstacle | 1 |
 | ❤️ Heart | Gives back a life |
+| 🪙 Coin | 1 coin to spend in the Shop (no points) |
+
+## Coins and the Shop
+
+Collect coins floating in the water, and earn a coin bonus for every level you finish (10 coins plus 5 for each level number, so level 3 gives 25). Spend them in the **Shop**, which opens from the main menu or from the level-complete screen. The Shop isn't available while paused.
+
+Buying takes two taps, so coins aren't spent by accident.
+
+| Tab | What you can buy |
+|---|---|
+| **Hats** | 18 hats: beanies in red, orange, yellow, green, blue, purple and pastel, plus a pink bow, ball caps, party hats (plain, sparkly, flashy and rainbow), a top hat, a **Santa hat**, a wizard hat and a gold crown. Tap a hat you own to wear it or take it off. |
+| **Skins** | 8 special axolotl skins with effects: Glitter, Frosty, Cotton Candy, Glow, Disco, Lava, Galaxy and Golden |
+| **Power** | **Shields** (10 coins). In a game, tap the shield button next to pause to be safe from bumps for 5 seconds. Carry up to 5. |
+| **Friends** | Hire a friend as a **helper** for the next level (15 coins). It swims in circles around you and grabs any treats and coins it touches. Or **unlock** a friend for good and play as them! |
+
+### Axolotl friends
+
+| Friend | Unlock price | Bonus when you play as them |
+|---|---|---|
+| Seahorse | 120 | Pulls nearby treats and coins toward you |
+| Shrimp | 100 | Tiny, so it's easier to dodge things |
+| Turtle | 150 | Gets 1 extra heart |
+| Puffer | 130 | Shields last 8 seconds instead of 5 |
+
+Pick who you play as in **Shop → Friends**. Hats work on every friend too.
+A helper stays with you until you finish the level, even if you run out of hearts and try again.
 
 ## Levels
 
@@ -49,7 +75,8 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 
 - **Player profiles.** Up to 6 players, each with their own name, level, skins and best score. Everything is saved and survives power-off.
 - **Leaderboard.** The top 10 scores, with player names and the level reached.
-- **17 axolotl skins**, unlocked one per level finished, with a **NEW!** badge until you've looked at them
+- **27 axolotl skins**: 19 unlocked one per level finished (with a **NEW!** badge until you've looked at them) and 8 special ones in the Shop
+- **Coins, a Shop, hats, shields and helper friends**, plus four friends you can play as
 - **Four underwater places** that take turns level by level: Sunny Lagoon, Coral Reef, Sunset Bay and Deep Sea
 - **Pause menu.** Change your skin or sound volume in the middle of a game, then keep swimming. Quitting needs two taps, so little fingers don't end a game by accident.
 - **Three speeds:** Easy (5 hearts), Normal and Zoom!
@@ -58,7 +85,8 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 - **The RGB LED** on the back flashes on treats, bumps and milestones
 - **Screen dims** after a minute without a touch on the menus, to save power. Any touch wakes it.
 - A little bubble trail follows your axolotl as it swims
-- Flicker-free graphics at around 25 frames per second
+- **Full colour** (65,000 colours) for smooth pastels, sparkles and glows
+- Flicker-free graphics at around 20–25 frames per second
 
 ### Skins
 
@@ -81,11 +109,16 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 | Shadow (deep black) | Finish level 14 |
 | Forest (dark green) | Finish level 15 |
 | Twilight (dark rainbow) | Finish level 16 |
+| Tangerine (bright orange) | Finish level 17 |
+| Slate (dark gray) | Finish level 18 |
+
+**Shop skins:** Glitter (sparkly pink), Frosty (sparkly ice blue), Cotton Candy (pastel pink and blue), Glow (glowing green), Disco (flashes pink and blue), Lava (glowing orange and red), Galaxy (twinkling stars) and Golden (sparkly gold). Flashing effects swap colours less than twice a second, so they stay gentle on the eyes.
 
 ## Menus
 
 - **Who's playing?** appears at start-up when there's more than one player. Tap your name, tap **+ New** to add a player, or tap **Delete** to remove one.
-- **Main menu:** Play, Scores (leaderboard), Player (switch player), Skin, Speed and Sound
+- **Main menu:** Shop, Play, Scores (leaderboard), Skin, Speed, Sound and Player (switch player)
+- **Level complete:** Next, Shop and Menu
 - **Pause menu:** Keep Swimming, Skin, Sound and Quit to Menu
 
 ## Hardware
@@ -104,7 +137,7 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
    - **XPT2046_Touchscreen** by Paul Stoffregen
 4. Copy `TFT_eSPI_Setup/User_Setup.h` over the file with the same name in your Arduino libraries folder, in `libraries/TFT_eSPI/`.
    > ⚠️ The screen won't work without this step. If you update TFT_eSPI later, you'll need to copy the file again.
-5. Open `AxolotlAdventure/AxolotlAdventure.ino` in the Arduino IDE. `GameTypes.h` must be in the same folder.
+5. Open `AxolotlAdventure/AxolotlAdventure.ino` in the Arduino IDE. The whole game is in this one file.
 6. Choose **Tools → Board → ESP32 Dev Module** and your CYD's port.
 7. Click **Upload**.
 
@@ -117,6 +150,7 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 | The picture is upside down | Change `tft.setRotation(1)` to `tft.setRotation(3)` in `setup()` |
 | White screen or wrong colours | Try `ILI9341_DRIVER` instead of `ILI9341_2_DRIVER` in `User_Setup.h` |
 | Glitchy or garbled picture | Lower `SPI_FREQUENCY` to `40000000` in `User_Setup.h` |
+| Game feels slow or jerky | Set `FULL_COLOUR` to `0` near the top of the sketch. It uses 256 colours and draws a little faster. |
 | Crashes or boot loops | Try version **2.0.17** of the esp32 board package |
 | No sound | Check a speaker is plugged into `SPEAK` and the sound setting isn't **Off** |
 | Want to wipe all saved players and scores | In Arduino IDE, set **Tools → Erase All Flash Before Sketch Upload → Enabled** and upload again |
@@ -127,6 +161,9 @@ Most settings are near the top of `AxolotlAdventure.ino`:
 
 - `WORM_POINTS`, `BUBBLE_POINTS`, `TROPHY_POINTS` and `PASS_POINTS` set what each thing is worth
 - `TROPHY_MIN_WORMS` and `TROPHY_MAX_WORMS` control how often golden trophies appear
+- `levelCoinBonus()`, `SHIELD_PRICE`, `HELPER_PRICE` and `MAX_SHIELDS` set coin rewards and shop prices
+- `HATS[]`, the shop part of `SKINS[]` and `FRIENDS[]` list everything in the Shop, with prices. Add new items to the **end** of each list so saved players keep what they've bought.
+- `FULL_COLOUR` switches between 65,000 colours (`1`) and 256 colours (`0`)
 - `levelGoal()` sets the points needed for each level
 - `IMPULSE`, `SWIM_ACC` and `MAX_VY` change how the axolotl swims
 - `MODES[]` sets the speed, obstacle spacing and hearts for Easy, Normal and Zoom!
@@ -140,8 +177,7 @@ Most settings are near the top of `AxolotlAdventure.ino`:
 ```
 axolotl-adventure/
 ├── AxolotlAdventure/
-│   ├── AxolotlAdventure.ino   Main game
-│   └── GameTypes.h            Shared game data types
+│   └── AxolotlAdventure.ino   The whole game
 ├── TFT_eSPI_Setup/
 │   └── User_Setup.h           Display setup for the CYD
 ├── CHANGELOG.md
