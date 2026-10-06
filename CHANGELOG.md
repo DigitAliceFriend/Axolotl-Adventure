@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2
+- The pastel collection (Blossom, Peach, Butter, Pistachio, Seafoam, Baby Blue and Lilac) and Dusky can now be bought in the Shop for 75–150 coins, or still unlocked by levels
+- Background music that pauses for sound effects, with an on/off switch in Settings and the pause menu
+- New Settings screen: Speed, Sound, Music and Brightness
+- Stickers: 14 goals to collect, each with a coin reward and a progress display
+- Perfect-level bonus: 10 extra coins for finishing a level without a bump
+- Revive: keep swimming for 25 coins when you run out of hearts (once per level)
+- A "New best!" cheer when you beat your best score mid-game
+- Saved players keep all their progress
+
 ## v1.1
 - The version number now shows in small print next to the title
 - Pastel skin collection, unlocked at levels 19–25: Blossom, Peach, Butter, Pistachio, Seafoam, Baby Blue and Lilac

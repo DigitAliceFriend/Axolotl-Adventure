@@ -1,6 +1,6 @@
 # 🦎 Axolotl Adventure
 
-**by AliceFriend** · version 1.1 (see [CHANGELOG.md](CHANGELOG.md))
+**by AliceFriend** · version 1.2 (see [CHANGELOG.md](CHANGELOG.md))
 
 A cheerful underwater side-scroller for kids, made for the ESP32 **"Cheap Yellow Display"** (CYD). Guide your axolotl through the water, dodge rocks, seaweed and fish, eat worms, pop bubbles, and swim through level after level to unlock new axolotl skins.
 
@@ -33,10 +33,36 @@ Collect coins floating in the water, and earn a coin bonus for every level you f
 
 Buying takes two taps, so coins aren't spent by accident.
 
+- **Perfect levels:** finish a level without getting bumped for 10 bonus coins.
+- **Revive:** when you run out of hearts, you can pay 25 coins to keep swimming with 2 hearts. You can do this once per level.
+
+## Stickers
+
+Earn stickers by reaching goals. Each one pays coins:
+
+| Sticker | Goal | Coins |
+|---|---|---|
+| First Swim | Finish level 1 | 5 |
+| Worm Muncher | Eat 50 worms | 10 |
+| Worm Feast | Eat 500 worms | 30 |
+| Bubble Popper | Pop 100 bubbles | 10 |
+| Coin Collector | Pick up 250 coins | 20 |
+| Trophy Hunter | Find a golden trophy | 20 |
+| Flawless | Finish a level with no bumps | 15 |
+| Perfect Five | 5 levels with no bumps | 30 |
+| Explorer | Finish level 5 | 20 |
+| Deep Diver | Finish level 10 | 40 |
+| Fashionista | Own 5 hats | 20 |
+| Best Friends | Unlock a friend to play as | 20 |
+| Super Swimmer | Score 500 in one game | 30 |
+| Legend | Finish level 26 | 100 |
+
+Tap a sticker on the Stickers screen to see how close you are.
+
 | Tab | What you can buy |
 |---|---|
 | **Hats** | 18 hats: beanies in red, orange, yellow, green, blue, purple and pastel, plus a pink bow, ball caps, party hats (plain, sparkly, flashy and rainbow), a top hat, a **Santa hat**, a wizard hat and a gold crown. Tap a hat you own to wear it or take it off. |
-| **Skins** | 8 special axolotl skins with effects: Glitter, Frosty, Cotton Candy, Glow, Disco, Lava, Galaxy and Golden |
+| **Skins** | 8 special axolotl skins with effects (Glitter, Frosty, Cotton Candy, Glow, Disco, Lava, Galaxy and Golden), plus the pastel collection and Dusky, which you can buy early instead of waiting for their level |
 | **Power** | **Shields** (10 coins). In a game, tap the shield button next to pause to be safe from bumps for 5 seconds. Carry up to 5. |
 | **Friends** | Hire a friend as a **helper** for the next level (15 coins). It swims in circles around you and grabs any treats and coins it touches. Or **unlock** a friend for good and play as them! |
 
@@ -83,7 +109,9 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 - **Pause menu.** Change your skin or sound volume in the middle of a game, then keep swimming. Quitting needs two taps, so little fingers don't end a game by accident.
 - **Three speeds:** Easy (5 hearts), Normal and Zoom!
 - **Kid-friendly design:** hearts instead of instant game over, forgiving hitboxes, a short safe time after each bump, and lots of cheering
-- **Sound effects** with Off / Quiet / Loud settings
+- **Sound effects** with Off / Quiet / Loud settings, and **background music** that you can turn on or off
+- **Settings** for speed, sound, music and screen brightness
+- **Stickers** to collect, a **New best!** cheer when you beat your record, perfect-level bonuses and revives
 - **The RGB LED** on the back flashes on treats, bumps and milestones
 - **Screen dims** after a minute without a touch on the menus, to save power. Any touch wakes it.
 - A little bubble trail follows your axolotl as it swims
@@ -122,14 +150,28 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 | Lilac (pastel purple) | Finish level 25 |
 | Dusky (fades between blue, pink and purple) | Finish level 26 |
 
+The pastel collection and Dusky can also be bought early in the Shop:
+
+| Skin | Price |
+|---|---|
+| Blossom | 75 |
+| Peach | 80 |
+| Butter | 85 |
+| Pistachio | 90 |
+| Seafoam | 95 |
+| Baby Blue | 100 |
+| Lilac | 110 |
+| Dusky | 150 |
+
 **Shop skins:** Glitter (sparkly pink), Frosty (sparkly ice blue), Cotton Candy (pastel pink and blue), Glow (glowing green), Disco (flashes pink and blue), Lava (glowing orange and red), Galaxy (twinkling stars) and Golden (sparkly gold). Flashing effects swap colours less than twice a second, so they stay gentle on the eyes.
 
 ## Menus
 
 - **Who's playing?** appears at start-up when there's more than one player. Tap your name, tap **+ New** to add a player, or tap **Delete** to remove one.
-- **Main menu:** Shop, Play, Scores (leaderboard), Skin, Speed, Sound and Player (switch player)
+- **Main menu:** Shop, Play, Scores (leaderboard), Skin, Stickers, Settings and Player (switch player)
+- **Settings:** Speed, Sound, Music and Brightness
 - **Level complete:** Next, Shop and Menu
-- **Pause menu:** Keep Swimming, Skin, Sound and Quit to Menu
+- **Pause menu:** Keep Swimming, Skin, Sound, Music and Quit to Menu
 
 ## Hardware
 
@@ -171,7 +213,9 @@ Most settings are near the top of `AxolotlAdventure.ino`:
 
 - `WORM_POINTS`, `BUBBLE_POINTS`, `TROPHY_POINTS` and `PASS_POINTS` set what each thing is worth
 - `TROPHY_MIN_WORMS` and `TROPHY_MAX_WORMS` control how often golden trophies appear
-- `levelCoinBonus()`, `SHIELD_PRICE`, `HELPER_PRICE` and `MAX_SHIELDS` set coin rewards and shop prices
+- `levelCoinBonus()`, `PERFECT_BONUS`, `REVIVE_PRICE`, `SHIELD_PRICE`, `HELPER_PRICE` and `MAX_SHIELDS` set coin rewards and prices
+- `STICKERS[]` lists the stickers, their goals and rewards
+- `MUSIC[]` is the background tune, written as `{frequency in Hz, length in ms}` notes
 - `HATS[]`, the shop part of `SKINS[]` and `FRIENDS[]` list everything in the Shop, with prices. Add new items to the **end** of each list so saved players keep what they've bought.
 - `FULL_COLOUR` switches between 65,000 colours (`1`) and 256 colours (`0`)
 - `levelGoal()` sets the points needed for each level

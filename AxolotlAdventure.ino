@@ -1,7 +1,7 @@
 /*
  * ============================================================
  *              AXOLOTL ADVENTURE  by AliceFriend
- *                       version 1.1
+ *                       version 1.2
  * ============================================================
  *  For the original "Cheap Yellow Display" (ESP32-2432S028R)
  *  ILI9341 320x240 screen + XPT2046 touch + speaker + RGB LED
@@ -45,6 +45,9 @@ enum State {
   ST_SKINS,      // skin picker
   ST_SCORES,     // leaderboard
   ST_SHOP,       // spend coins
+  ST_STICKERS,   // achievements
+  ST_SETTINGS,   // speed, sound, music, brightness
+  ST_REVIVE,     // "keep swimming for 25 coins?"
   ST_READY,      // 3-2-1 countdown
   ST_PLAY,
   ST_PAUSE,      // pause menu
@@ -82,8 +85,8 @@ struct Skin {
   uint16_t body, belly, gill, eye;
   uint8_t  fx;
   uint16_t alt;         // second colour for effects
-  uint16_t price;       // 0 = unlocked by levels, otherwise bought in the shop
-  uint8_t  lvl;         // level skins: unlocked after finishing this many levels
+  uint16_t price;       // shop price (0 = not sold in the shop)
+  uint8_t  lvl;         // unlocked after finishing this many levels (0 with a price = shop only)
 };
 
 enum HatStyle : uint8_t { HAT_BEANIE, HAT_PARTY, HAT_TOP, HAT_CAP, HAT_BOW, HAT_CROWN, HAT_SANTA, HAT_WIZARD };
@@ -113,7 +116,18 @@ struct Profile {
   uint8_t  friendsOwned;// one bit per friend you can play as
   uint8_t  character;   // 0 = axolotl, otherwise friend number + 1
   uint8_t  helper;      // friend number + 1 joining you next level, 0 = none
+  // ---- added in v1.2 ----
+  uint32_t wormsEaten;
+  uint32_t bubblesPopped;
+  uint32_t coinsCollected;   // coins picked up from the water
+  uint16_t trophiesFound;
+  uint16_t perfectLevels;    // levels finished without a bump
+  uint32_t stickers;         // one bit per sticker earned
 };
+
+// Stickers (achievements): reach the target to earn the sticker and its coins
+enum StickerKind : uint8_t { SK_LEVELS, SK_WORMS, SK_BUBBLES, SK_COINS, SK_TROPHIES, SK_PERFECT, SK_HATS, SK_FRIENDS, SK_SCORE };
+struct Sticker { const char* name; const char* desc; uint8_t kind; uint32_t target; uint16_t reward; uint16_t color; };
 
 // ---------------- Full-colour drawing ----------------
 // A full-screen 65,000-colour buffer doesn't fit in the ESP32's memory, so the
@@ -150,7 +164,7 @@ struct ScoreEntry {
   uint32_t score;
 };
 
-#define GAME_VERSION "1.1"   // shown next to the title (see CHANGELOG.md)
+#define GAME_VERSION "1.2"   // shown next to the title (see CHANGELOG.md)
 
 // ---------------- Hardware pins (original CYD) ----------------
 #define XPT2046_IRQ   36
@@ -166,8 +180,9 @@ struct ScoreEntry {
 
 // Screen dims after this long without a touch on a menu (saves battery)
 #define DIM_AFTER_MS  60000
-#define BRIGHT_FULL   255
 #define BRIGHT_DIM    20
+const uint8_t BRIGHT_LEVELS[3] = {90, 170, 255};   // Low, Medium, High
+const char* BRIGHT_NAMES[3] = {"Low", "Medium", "High"};
 
 // 1 = full colour (65,000 colours, smooth pastels). 0 = 256 colours, a little faster.
 #define FULL_COLOUR   1
@@ -203,6 +218,8 @@ static const int SHIELD_PRICE = 10;
 static const int HELPER_PRICE = 15;
 static const int MAX_SHIELDS  = 5;
 int levelCoinBonus(int lvl) { return 10 + 5 * lvl; }   // coins for finishing a level
+static const int PERFECT_BONUS = 10;   // extra coins for a level with no bumps
+static const int REVIVE_PRICE  = 25;   // coins to keep swimming when out of hearts (once per level)
 
 // Characters (0 = axolotl, then the friends)
 #define CH_AXOLOTL  0
@@ -328,19 +345,26 @@ const Skin SKINS[] = {
   {"Lava",     RGB(255, 90, 0),    RGB(255, 190, 90),  RGB(180, 20, 0),    C_BLACK, FX_PULSE,   RGB(220, 20, 20), 80, 0},
   {"Galaxy",   RGB(45, 25, 95),    RGB(80, 55, 140),   RGB(255, 120, 230), C_WHITE, FX_STARS,   RGB(255, 255, 200), 90, 0},
   {"Golden",   RGB(255, 200, 40),  RGB(255, 235, 140), RGB(230, 140, 0),   C_BLACK, FX_SPARKLE, RGB(255, 255, 220), 100, 0},
-  // ---- pastel collection (unlocked by levels; added at the end so saves stay correct) ----
-  {"Blossom",   RGB(255, 200, 215), RGB(255, 235, 240), RGB(240, 150, 180), C_BLACK, FX_NONE, 0, 0, 19},  // pastel pink
-  {"Peach",     RGB(255, 205, 170), RGB(255, 235, 215), RGB(240, 150, 120), C_BLACK, FX_NONE, 0, 0, 20},  // pastel peach
-  {"Butter",    RGB(255, 240, 170), RGB(255, 250, 222), RGB(235, 200, 110), C_BLACK, FX_NONE, 0, 0, 21},  // pastel yellow
-  {"Pistachio", RGB(200, 235, 180), RGB(230, 250, 215), RGB(140, 195, 125), C_BLACK, FX_NONE, 0, 0, 22},  // pastel green
-  {"Seafoam",   RGB(175, 235, 220), RGB(220, 250, 242), RGB(110, 195, 180), C_BLACK, FX_NONE, 0, 0, 23},  // pastel aqua
-  {"Baby Blue", RGB(180, 210, 255), RGB(225, 238, 255), RGB(120, 160, 230), C_BLACK, FX_NONE, 0, 0, 24},  // pastel blue
-  {"Lilac",     RGB(215, 190, 245), RGB(238, 225, 252), RGB(165, 130, 215), C_BLACK, FX_NONE, 0, 0, 25},  // pastel purple
-  {"Dusky",     RGB(95, 125, 210),  RGB(220, 210, 240), RGB(130, 90, 190),  C_BLACK, FX_DUSK, 0, 0, 26},  // fades blue, pink, purple
+  // ---- pastel collection: unlock by levels OR buy in the shop (kept at the end so saves stay correct) ----
+  {"Blossom",   RGB(255, 200, 215), RGB(255, 235, 240), RGB(240, 150, 180), C_BLACK, FX_NONE, 0, 75, 19},  // pastel pink
+  {"Peach",     RGB(255, 205, 170), RGB(255, 235, 215), RGB(240, 150, 120), C_BLACK, FX_NONE, 0, 80, 20},  // pastel peach
+  {"Butter",    RGB(255, 240, 170), RGB(255, 250, 222), RGB(235, 200, 110), C_BLACK, FX_NONE, 0, 85, 21},  // pastel yellow
+  {"Pistachio", RGB(200, 235, 180), RGB(230, 250, 215), RGB(140, 195, 125), C_BLACK, FX_NONE, 0, 90, 22},  // pastel green
+  {"Seafoam",   RGB(175, 235, 220), RGB(220, 250, 242), RGB(110, 195, 180), C_BLACK, FX_NONE, 0, 95, 23},  // pastel aqua
+  {"Baby Blue", RGB(180, 210, 255), RGB(225, 238, 255), RGB(120, 160, 230), C_BLACK, FX_NONE, 0, 100, 24},  // pastel blue
+  {"Lilac",     RGB(215, 190, 245), RGB(238, 225, 252), RGB(165, 130, 215), C_BLACK, FX_NONE, 0, 110, 25},  // pastel purple
+  {"Dusky",     RGB(95, 125, 210),  RGB(220, 210, 240), RGB(130, 90, 190),  C_BLACK, FX_DUSK, 0, 150, 26},  // fades blue, pink, purple
 };
 const int N_SKINS = sizeof(SKINS) / sizeof(SKINS[0]);
-const int FIRST_SHOP_SKIN = 19;                 // shop skins are SKINS[19] to SKINS[26]
-const int N_SHOP_SKINS = 8;
+const int FIRST_SHOP_SKIN = 19;                 // skins from here on can have a shop price
+// (each one's "bought" flag is bit number (skin - FIRST_SHOP_SKIN) in skinsOwned)
+
+bool isLevelSkin(int i) { return SKINS[i].lvl > 0 || SKINS[i].price == 0; }   // unlocks by finishing levels
+bool isShopOnly(int i)  { return SKINS[i].lvl == 0 && SKINS[i].price > 0; }
+
+// The Shop's Skins tab: shop-only skins first, then level skins you can buy early
+int SHOP_SKIN_LIST[N_SKINS];
+int N_SHOP_SKINS = 0;
 const int MAX_SKIN_LEVEL = 26;                  // the last level that unlocks a skin
 int SKIN_ORDER[N_SKINS];                        // skin screen order: by unlock level, then shop skins
 
@@ -348,9 +372,12 @@ void buildSkinOrder() {
   int n = 0;
   for (int l = 0; l <= MAX_SKIN_LEVEL; l++)
     for (int i = 0; i < N_SKINS; i++)
-      if (SKINS[i].price == 0 && SKINS[i].lvl == l) SKIN_ORDER[n++] = i;
+      if (isLevelSkin(i) && SKINS[i].lvl == l) SKIN_ORDER[n++] = i;
   for (int i = 0; i < N_SKINS; i++)
-    if (SKINS[i].price > 0) SKIN_ORDER[n++] = i;
+    if (isShopOnly(i)) SKIN_ORDER[n++] = i;
+  N_SHOP_SKINS = 0;
+  for (int i = 0; i < N_SKINS; i++) if (isShopOnly(i)) SHOP_SKIN_LIST[N_SHOP_SKINS++] = i;
+  for (int i = 0; i < N_SKINS; i++) if (SKINS[i].price > 0 && !isShopOnly(i)) SHOP_SKIN_LIST[N_SHOP_SKINS++] = i;
 }
 
 // ---------------- Hats (bought in the shop) ----------------
@@ -386,6 +413,26 @@ const Friend FRIENDS[] = {
   {"Puffer",   "Shields last 8 seconds",           RGB(255, 215, 80),  RGB(255, 245, 200), RGB(210, 150, 30), 130},
 };
 const int N_FRIENDS = sizeof(FRIENDS) / sizeof(FRIENDS[0]);
+
+// ---------------- Stickers ----------------
+//  name              how to get it                  kind         target  coins  colour
+const Sticker STICKERS[] = {
+  {"First Swim",     "Finish level 1",               SK_LEVELS,   1,      5,     RGB(80, 200, 255)},
+  {"Worm Muncher",   "Eat 50 worms",                 SK_WORMS,    50,     10,    RGB(240, 130, 125)},
+  {"Worm Feast",     "Eat 500 worms",                SK_WORMS,    500,    30,    RGB(220, 80, 90)},
+  {"Bubble Popper",  "Pop 100 bubbles",              SK_BUBBLES,  100,    10,    RGB(150, 220, 255)},
+  {"Coin Collector", "Pick up 250 coins",            SK_COINS,    250,    20,    RGB(255, 215, 40)},
+  {"Trophy Hunter",  "Find a golden trophy",         SK_TROPHIES, 1,      20,    RGB(255, 190, 0)},
+  {"Flawless",       "Finish a level with no bumps", SK_PERFECT,  1,      15,    RGB(120, 230, 140)},
+  {"Perfect Five",   "5 levels with no bumps",       SK_PERFECT,  5,      30,    RGB(40, 180, 90)},
+  {"Explorer",       "Finish level 5",               SK_LEVELS,   5,      20,    RGB(60, 170, 220)},
+  {"Deep Diver",     "Finish level 10",              SK_LEVELS,   10,     40,    RGB(40, 90, 200)},
+  {"Fashionista",    "Own 5 hats",                   SK_HATS,     5,      20,    RGB(255, 105, 180)},
+  {"Best Friends",   "Unlock a friend to play as",   SK_FRIENDS,  1,      20,    RGB(255, 170, 60)},
+  {"Super Swimmer",  "Score 500 in one game",        SK_SCORE,    500,    30,    RGB(190, 110, 235)},
+  {"Legend",         "Finish level 26",              SK_LEVELS,   26,     100,   RGB(255, 80, 200)},
+};
+const int N_STICKERS = sizeof(STICKERS) / sizeof(STICKERS[0]);
 
 // ---------------- Speed modes (same speed on every level) ----------------
 const Mode MODES[3] = {
@@ -460,13 +507,30 @@ void backlightInit() {
   ledcSetup(BL_CH, 5000, 8);
   ledcAttachPin(BACKLIGHT_PIN, BL_CH);
 #endif
-  ledcWrite(BL_CH, BRIGHT_FULL);
+  ledcWrite(BL_CH, 255);
 }
 
-void speakerTone(uint16_t f) {
+volatile bool musicWanted = false;   // set by the game: music on AND playing a level
+volatile bool musicOn = true;        // the Music setting
+
+// Background tune (an original little melody). It loops, pauses for sound
+// effects, then carries on. {frequency in Hz, length in ms}, 0 = rest.
+const Note MUSIC[] = {
+  {523, 150}, {659, 150}, {784, 150}, {659, 150}, {698, 150}, {880, 150}, {784, 300},
+  {659, 150}, {784, 150}, {1047, 150}, {784, 150}, {698, 150}, {659, 150}, {587, 300},
+  {523, 150}, {587, 150}, {659, 150}, {523, 150}, {587, 150}, {659, 150}, {698, 150}, {587, 150},
+  {659, 150}, {587, 150}, {523, 150}, {494, 150}, {523, 300}, {0, 300},
+  {392, 150}, {523, 150}, {659, 150}, {523, 150}, {440, 150}, {587, 150}, {698, 300},
+  {659, 150}, {587, 150}, {523, 150}, {587, 150}, {659, 150}, {587, 150}, {523, 300}, {0, 300},
+};
+const int MUSIC_LEN = sizeof(MUSIC) / sizeof(MUSIC[0]);
+
+void speakerTone(uint16_t f, bool music = false) {
   if (f == 0 || volume == 0) { ledcWrite(SPK_CH, 0); return; }
   ledcChangeFrequency(SPK_CH, f, 8);
-  ledcWrite(SPK_CH, volume == 1 ? 10 : 128);   // smaller duty = quieter
+  uint8_t duty = volume == 1 ? 10 : 128;     // smaller duty = quieter
+  if (music) duty = volume == 1 ? 4 : 30;    // music sits underneath the sound effects
+  ledcWrite(SPK_CH, duty);
 }
 
 // prio: higher numbers can interrupt lower ones
@@ -484,6 +548,9 @@ void soundTask(void*) {
   const Note* seq = nullptr;
   uint8_t len = 0, pos = 0;
   uint32_t noteEnd = 0;
+  int mPos = 0;
+  uint32_t mEnd = 0;
+  bool mPlaying = false;
   for (;;) {
     const Note* req = nullptr;
     uint8_t reqLen = 0;
@@ -492,21 +559,34 @@ void soundTask(void*) {
     portEXIT_CRITICAL(&sndMux);
 
     uint32_t now = millis();
-    if (req) {
+    if (req) {                                   // a new sound effect
       seq = req; len = reqLen; pos = 0;
       speakerTone(seq[0].f);
       noteEnd = now + seq[0].ms;
-    } else if (seq && (int32_t)(now - noteEnd) >= 0) {
-      pos++;
-      if (pos >= len) {
-        seq = nullptr;
-        speakerTone(0);
-        sndBusy = false;
-        sndBusyPrio = 0;
-      } else {
-        speakerTone(seq[pos].f);
-        noteEnd = now + seq[pos].ms;
+    } else if (seq) {                            // a sound effect is playing
+      if ((int32_t)(now - noteEnd) >= 0) {
+        pos++;
+        if (pos >= len) {
+          seq = nullptr;
+          speakerTone(0);
+          sndBusy = false;
+          sndBusyPrio = 0;
+          mEnd = now;                            // let the music carry on
+        } else {
+          speakerTone(seq[pos].f);
+          noteEnd = now + seq[pos].ms;
+        }
       }
+    } else if (musicWanted && musicOn) {         // background music
+      if (!mPlaying || (int32_t)(now - mEnd) >= 0) {
+        if (mPlaying) mPos = (mPos + 1) % MUSIC_LEN;
+        mPlaying = true;
+        speakerTone(MUSIC[mPos].f, true);
+        mEnd = now + MUSIC[mPos].ms;
+      }
+    } else if (mPlaying) {
+      mPlaying = false;
+      speakerTone(0);
     }
     vTaskDelay(1);
   }
@@ -600,6 +680,12 @@ int   newSkinIdx = -1;
 char  nameBuf[NAME_LEN + 1];
 int   nameLen = 0;
 uint32_t lastMs = 0, lastActivityMs = 0;
+int   brightness = 2;                       // 0 low, 1 medium, 2 high
+bool  hitThisLevel = false, revivedThisLevel = false, perfectLevel = false, cheeredBest = false;
+int   stickerQueue[4], stickerQLen = 0;     // stickers waiting to be shown
+float stickerT = 0;                         // how long the current sticker banner shows
+int   stickerSel = 0;                       // sticker selected on the stickers screen
+State settingsReturn = ST_TITLE;
 bool  dimmed = false;
 
 // ============================================================
@@ -618,8 +704,9 @@ void saveProfile(int i) {
 void saveScores() { prefs.putBytes("lb", scores, sizeof(scores)); }
 
 bool skinOwnedBy(const Profile& p, int i) {
-  if (SKINS[i].price > 0) return (p.skinsOwned >> (i - FIRST_SHOP_SKIN)) & 1;
-  return p.level - 1 >= SKINS[i].lvl;          // levels finished
+  bool bought = SKINS[i].price > 0 && i >= FIRST_SHOP_SKIN && ((p.skinsOwned >> (i - FIRST_SHOP_SKIN)) & 1);
+  bool earned = isLevelSkin(i) && p.level - 1 >= SKINS[i].lvl;   // levels finished
+  return bought || earned;
 }
 
 void loadSaved() {
@@ -669,6 +756,59 @@ int insertScore(const char* name, uint32_t score, uint16_t level) {
   scores[pos].score = score;
   saveScores();
   return pos;
+}
+
+// ============================================================
+//   STICKERS
+// ============================================================
+int countBits(uint32_t v) { int n = 0; while (v) { n += v & 1; v >>= 1; } return n; }
+
+uint32_t stickerProgress(int i) {
+  const Profile& p = profiles[cur];
+  switch (STICKERS[i].kind) {
+    case SK_LEVELS:   return p.level - 1;
+    case SK_WORMS:    return p.wormsEaten;
+    case SK_BUBBLES:  return p.bubblesPopped;
+    case SK_COINS:    return p.coinsCollected;
+    case SK_TROPHIES: return p.trophiesFound;
+    case SK_PERFECT:  return p.perfectLevels;
+    case SK_HATS:     return countBits(p.hatsOwned);
+    case SK_FRIENDS:  return countBits(p.friendsOwned);
+    default: {        // SK_SCORE: best score, including the game being played now
+      uint32_t live = runActive ? (uint32_t)runScore : 0;
+      return p.best > live ? p.best : live;
+    }
+  }
+}
+
+bool stickerEarned(int i) { return (profiles[cur].stickers >> i) & 1; }
+
+// Checks every sticker; any newly earned ones pay out coins and show a banner.
+void checkStickers() {
+  if (cur < 0) return;
+  bool any = false;
+  for (int i = 0; i < N_STICKERS; i++) {
+    if (stickerEarned(i) || stickerProgress(i) < STICKERS[i].target) continue;
+    P().stickers |= (1UL << i);
+    P().coins += STICKERS[i].reward;
+    if (stickerQLen < 4) stickerQueue[stickerQLen++] = i;
+    if (stickerT <= 0) stickerT = 2.8f;
+    any = true;
+  }
+  if (any) {
+    saveProfile(cur);
+    playSound(SND(SND_MILESTONE), 2);
+    ledFlash(1, 0, 1, 500);
+  }
+}
+
+void updateStickerBanner(float dt) {
+  if (stickerQLen == 0) return;
+  stickerT -= dt;
+  if (stickerT > 0) return;
+  for (int k = 1; k < stickerQLen; k++) stickerQueue[k - 1] = stickerQueue[k];
+  stickerQLen--;
+  if (stickerQLen > 0) stickerT = 2.8f;
 }
 
 // ============================================================
@@ -755,6 +895,21 @@ void drawPanel(int x, int y, int w, int h) {
   fb.drawRoundRect(x, y, w, h, 14, C_WHITE);
 }
 
+void drawStickerBadge(int cx, int cy, int r, int i, bool earned);
+
+void drawStickerBanner() {
+  if (stickerQLen == 0 || stickerT <= 0) return;
+  int i = stickerQueue[0];
+  int y = (state == ST_PLAY) ? 196 : 2;   // bottom while playing, top on menus
+  drawPanel(30, y, 260, 38);
+  drawStickerBadge(52, y + 19, 14, i, true);
+  char buf[40];
+  snprintf(buf, sizeof(buf), "Sticker: %s!", STICKERS[i].name);
+  textAt(buf, 72, y + 11, 2, C_GOLD, ML_DATUM);
+  snprintf(buf, sizeof(buf), "+%d coins", STICKERS[i].reward);
+  textAt(buf, 72, y + 28, 2, C_WHITE, ML_DATUM);
+}
+
 void drawNewBadge(int x, int y) {
   fb.fillRoundRect(x, y, 38, 18, 8, C_RED_BTN);
   fb.drawRoundRect(x, y, 38, 18, 8, C_WHITE);
@@ -765,11 +920,30 @@ void drawNewBadge(int x, int y) {
 
 // "seen" = (levels finished + 1) when the player last looked at their skins
 int  levelsDone() { return P().level - 1; }
-bool isNewSkin(int i) { return SKINS[i].price == 0 && SKINS[i].lvl >= P().seen && SKINS[i].lvl <= levelsDone(); }
+bool skinBought(int i) { return SKINS[i].price > 0 && i >= FIRST_SHOP_SKIN && ((P().skinsOwned >> (i - FIRST_SHOP_SKIN)) & 1); }
+bool isNewSkin(int i) {
+  return isLevelSkin(i) && !skinBought(i) && SKINS[i].lvl >= P().seen && SKINS[i].lvl <= levelsDone();
+}
 bool hasNewSkins() {
   if (cur < 0) return false;
   for (int i = 0; i < N_SKINS; i++) if (isNewSkin(i)) return true;
   return false;
+}
+
+void drawStar(int cx, int cy, int r, uint16_t c);
+
+void drawStickerBadge(int cx, int cy, int r, int i, bool earned) {
+  if (earned) {
+    fb.fillCircle(cx, cy, r, STICKERS[i].color);
+    fb.drawCircle(cx, cy, r, C_WHITE);
+    drawStar(cx, cy, r * 6 / 10, C_WHITE);
+  } else {
+    fb.fillCircle(cx, cy, r, RGB(70, 75, 95));
+    fb.drawCircle(cx, cy, r, RGB(140, 145, 165));
+    fb.setTextDatum(MC_DATUM);
+    fb.setTextColor(RGB(170, 175, 195));
+    fb.drawString("?", cx, cy + 1, r > 12 ? 4 : 2);
+  }
 }
 
 void drawHeart(int x, int y, int s, uint16_t c) {
@@ -1105,7 +1279,8 @@ void drawCharacter(int ch, int skin, int hat, int cx, int cy, int s, float t) {
 }
 
 bool inGameState() {
-  return state == ST_READY || state == ST_PLAY || state == ST_PAUSE || state == ST_CLEAR || state == ST_OVER;
+  return state == ST_READY || state == ST_PLAY || state == ST_PAUSE || state == ST_CLEAR || state == ST_OVER ||
+         state == ST_REVIVE;
 }
 
 int currentTheme() { return inGameState() ? (curLevel - 1) % N_THEMES : 0; }
@@ -1494,6 +1669,8 @@ void startLevel() {
   speed = MODES[mode].speed;
   spawnDist = 120;
   shieldT = 0;
+  hitThisLevel = false;
+  revivedThisLevel = false;
   levelHelper = P().helper ? P().helper - 1 : -1;   // stays until the level is finished
   goReady();
   py = (surfaceY() + SAND_Y) / 2;   // start in the middle of the water
@@ -1501,6 +1678,7 @@ void startLevel() {
 
 void startRun() {
   runScore = 0;
+  cheeredBest = false;
   runActive = true;
   curLevel = P().level;
   startLevel();
@@ -1513,6 +1691,7 @@ void endRun() {
   if ((uint32_t)runScore > P().best) P().best = runScore;
   saveProfile(cur);                  // also saves coins and shields
   overRank = insertScore(P().name, runScore, curLevel);
+  checkStickers();
 }
 
 void levelComplete() {
@@ -1523,20 +1702,36 @@ void levelComplete() {
   Profile& p = P();
   if (curLevel >= p.level) {            // first time finishing this level
     for (int i = 0; i < N_SKINS; i++)
-      if (SKINS[i].price == 0 && SKINS[i].lvl == curLevel) { newSkinIdx = i; newSkinName = SKINS[i].name; }
+      if (isLevelSkin(i) && SKINS[i].lvl == curLevel && !skinBought(i)) { newSkinIdx = i; newSkinName = SKINS[i].name; }
   }
   coinBonus = levelCoinBonus(curLevel);
+  perfectLevel = !hitThisLevel;
+  if (perfectLevel) { coinBonus += PERFECT_BONUS; p.perfectLevels++; }
   p.coins += coinBonus;
   if (levelHelper >= 0) p.helper = 0;   // the helper's job is done
   if (curLevel >= p.level) p.level = curLevel + 1;
   if ((uint32_t)runScore > p.best) p.best = runScore;
   saveProfile(cur);
+  checkStickers();
   playSound(SND(SND_CLEAR), 4);
   ledFlash(0, 1, 0, 800);
   lockInput(900);
 }
 
+void finishGameOver();
+
+// Out of hearts: offer a revive if there are enough coins (once per level)
 void gameOver() {
+  if (!revivedThisLevel && P().coins >= (uint32_t)REVIVE_PRICE) {
+    state = ST_REVIVE;
+    playSound(SND(SND_HIT), 4);
+    lockInput(900);
+    return;
+  }
+  finishGameOver();
+}
+
+void finishGameOver() {
   state = ST_OVER;
   overT = 0;
   invuln = 0;
@@ -1553,6 +1748,10 @@ void addScore(int n) {
   int before = levelScore;
   levelScore += n;
   runScore += n;
+  if (!cheeredBest && P().best > 0 && (uint32_t)runScore > P().best) {   // beat your best mid-game
+    cheeredBest = true;
+    addText("New best!", W / 2, 96, C_GOLD);
+  }
   if (levelScore >= levelGoal(curLevel)) { levelComplete(); return; }
   if (levelScore / 25 > before / 25) {
     static const char* praise[] = {"Awesome!", "Super!", "Wow!", "Amazing!", "Splashy!", "Keep going!"};
@@ -1564,6 +1763,7 @@ void addScore(int n) {
 
 void hurt() {
   lives--;
+  hitThisLevel = true;
   invuln = 1.8f;
   vy = 0;
   burst(PLAYER_X, py, C_HEART, 10);
@@ -1655,10 +1855,10 @@ void obHitbox(const Obstacle& o, int& x, int& y, int& w, int& h) {
   }
 }
 
-void collect(Pickup& p) {
-  p.on = false;
+void collectOne(Pickup& p) {
   switch (p.type) {
     case PK_BUBBLE:
+      P().bubblesPopped++;
       burst(p.x, p.y, C_BUBBLE, 8);
       playSound(SND(SND_BUBBLE), 1);
       ledFlash(0, 1, 1, 120);
@@ -1666,6 +1866,7 @@ void collect(Pickup& p) {
       addScore(BUBBLE_POINTS);
       break;
     case PK_WORM:
+      P().wormsEaten++;
       burst(p.x, p.y, C_WORM, 8);
       playSound(SND(SND_WORM), 1);
       ledFlash(1, 1, 0, 150);
@@ -1673,6 +1874,7 @@ void collect(Pickup& p) {
       addScore(WORM_POINTS);
       break;
     case PK_TROPHY:
+      P().trophiesFound++;
       burst(p.x, p.y, C_TROPHY, 24);
       playSound(SND(SND_TROPHY), 3);
       ledFlash(1, 1, 0, 700);
@@ -1681,6 +1883,7 @@ void collect(Pickup& p) {
       break;
     case PK_COIN:
       if (P().coins < 999999) P().coins++;
+      P().coinsCollected++;
       burst(p.x, p.y, C_GOLD, 5);
       playSound(SND(SND_COIN), 1);
       ledFlash(1, 1, 0, 80);
@@ -1694,6 +1897,13 @@ void collect(Pickup& p) {
       break;
   }
 }
+
+void collect(Pickup& p) {
+  p.on = false;
+  collectOne(p);
+  if (state == ST_PLAY) checkStickers();
+}
+
 
 void openSkins(State returnTo) {
   skinReturn = returnTo;
@@ -1916,13 +2126,13 @@ void updateTitle(float dt) {
     playSound(SND(SND_CLICK));
     openSkins(ST_TITLE);
   } else if (inRect(tx, ty, 83, 178, 75, 48)) {
-    mode = (mode + 1) % 3;
-    prefs.putUChar("mode", mode);
     playSound(SND(SND_CLICK));
+    state = ST_STICKERS;
+    lockInput(250);
   } else if (inRect(tx, ty, 162, 178, 75, 48)) {
-    volume = (volume + 1) % 3;
-    prefs.putUChar("vol", volume);
-    playSound(SND(SND_SELECT));
+    playSound(SND(SND_CLICK));
+    state = ST_SETTINGS;
+    lockInput(250);
   } else if (inRect(tx, ty, 241, 178, 75, 48)) {
     playSound(SND(SND_CLICK));
     deleteMode = false;
@@ -1965,8 +2175,10 @@ void drawTitle() {
   drawButton(230, 122, 85, 44, "Scores", C_TEAL_BTN);
   drawButton2(4, 178, 75, 48, "SKIN", SKINS[P().skin].name, C_PURPLE_BTN);
   if (hasNewSkins()) drawNewBadge(44, 170);
-  drawButton2(83, 178, 75, 48, "SPEED", MODES[mode].name, RGB(200, 100, 30));
-  drawButton2(162, 178, 75, 48, "SOUND", VOL_NAMES[volume], C_BLUE_BTN);
+  char sb[12];
+  snprintf(sb, sizeof(sb), "%d/%d", countBits(P().stickers), N_STICKERS);
+  drawButton2(83, 178, 75, 48, "STICKERS", sb, RGB(200, 100, 30));
+  drawButton2(162, 178, 75, 48, "SETTINGS", MODES[mode].name, C_BLUE_BTN);
   drawButton2(241, 178, 75, 48, "PLAYER", P().name, C_TEAL_BTN);
 }
 
@@ -2025,8 +2237,9 @@ void drawSkins() {
 
   char buf[32];
   if (!un) {
-    if (sk.price == 0) snprintf(buf, sizeof(buf), "Finish level %d to unlock!", sk.lvl);
-    else               snprintf(buf, sizeof(buf), "Buy it in the Shop!");
+    if (isShopOnly(si))     snprintf(buf, sizeof(buf), "Buy it in the Shop!");
+    else if (sk.price > 0)  snprintf(buf, sizeof(buf), "Finish level %d, or buy in the Shop!", sk.lvl);
+    else                    snprintf(buf, sizeof(buf), "Finish level %d to unlock!", sk.lvl);
     shadowText(buf, W / 2, 174, 2, C_GOLD);
   } else if (si == P().skin && P().character == CH_AXOLOTL) {
     shadowText("This is you!", W / 2, 174, 2, C_GOLD);
@@ -2243,12 +2456,16 @@ void updatePause() {
   if (inRect(tx, ty, 70, 52, 180, 42)) {
     playSound(SND(SND_CLICK));
     goReady();
-  } else if (inRect(tx, ty, 55, 104, 100, 48)) {
+  } else if (inRect(tx, ty, 50, 104, 70, 48)) {
     playSound(SND(SND_CLICK));
     openSkins(ST_PAUSE);
-  } else if (inRect(tx, ty, 165, 104, 100, 48)) {
+  } else if (inRect(tx, ty, 125, 104, 70, 48)) {
     volume = (volume + 1) % 3;
     prefs.putUChar("vol", volume);
+    playSound(SND(SND_SELECT));
+  } else if (inRect(tx, ty, 200, 104, 70, 48)) {
+    musicOn = !musicOn;
+    prefs.putUChar("mus", musicOn);
     playSound(SND(SND_SELECT));
   } else if (inRect(tx, ty, 70, 166, 180, 42)) {
     if (!quitArmed) {              // first tap: ask to make sure
@@ -2271,9 +2488,10 @@ void drawPause() {
   drawPanel(40, 14, 240, 212);
   shadowText("Paused", W / 2, 33, 4, C_GOLD);
   drawButton(70, 52, 180, 42, "Keep Swimming", C_GREEN_BTN);
-  drawButton2(55, 104, 100, 48, "SKIN", SKINS[P().skin].name, C_PURPLE_BTN);
-  if (hasNewSkins()) drawNewBadge(120, 96);
-  drawButton2(165, 104, 100, 48, "SOUND", VOL_NAMES[volume], C_BLUE_BTN);
+  drawButton2(50, 104, 70, 48, "SKIN", SKINS[P().skin].name, C_PURPLE_BTN);
+  if (hasNewSkins()) drawNewBadge(88, 96);
+  drawButton2(125, 104, 70, 48, "SOUND", VOL_NAMES[volume], C_BLUE_BTN);
+  drawButton2(200, 104, 70, 48, "MUSIC", musicOn ? "On" : "Off", C_TEAL_BTN);
   drawButton(70, 166, 180, 42, quitArmed ? "Tap again to quit" : "Quit to Menu", quitArmed ? C_RED_BTN : C_ORANGE_BTN);
 }
 
@@ -2320,13 +2538,132 @@ void drawClear() {
     snprintf(buf, sizeof(buf), "Score: %d", runScore);
     shadowText(buf, W / 2, yInfo, 2, C_WHITE);
   }
-  snprintf(buf, sizeof(buf), "+%d coins!", coinBonus);
+  if (perfectLevel) snprintf(buf, sizeof(buf), "Perfect! +%d coins", coinBonus);
+  else              snprintf(buf, sizeof(buf), "+%d coins!", coinBonus);
   int tw = fb.textWidth(buf, 2);
   drawCoinIcon(W / 2 - tw / 2 - 9, yInfo + 15, 5);
   shadowText(buf, W / 2 + 3, yInfo + 15, 2, C_GOLD);
   drawButton(49, 168, 70, 40, "Next", C_GREEN_BTN);
   drawButton(127, 168, 70, 40, "Shop", C_ORANGE_BTN);
   drawButton(205, 168, 70, 40, "Menu", C_BLUE_BTN);
+}
+
+// ============================================================
+//   SCREEN: revive ("keep swimming for 25 coins?")
+// ============================================================
+void updateRevive() {
+  if (tapped(55, 150, 100, 44)) {
+    P().coins -= REVIVE_PRICE;
+    revivedThisLevel = true;
+    lives = 2;
+    invuln = 2.5f;              // a moment of safety to get going again
+    burst(PLAYER_X, py, C_HEART, 14);
+    playSound(SND(SND_HEART), 4);
+    ledFlash(1, 0, 1, 400);
+    goReady();
+  } else if (tapped(165, 150, 100, 44)) {
+    playSound(SND(SND_CLICK));
+    finishGameOver();
+  }
+}
+
+void drawPriceLine(int price, int y);
+
+void drawRevive() {
+  drawGame();
+  drawPanel(40, 46, 240, 156);
+  shadowText("Out of hearts!", W / 2, 70, 4, C_WHITE);
+  shadowText("Keep swimming for", W / 2, 98, 2, C_WHITE);
+  drawPriceLine(REVIVE_PRICE, 116);
+  drawButton(55, 150, 100, 44, "Yes!", C_GREEN_BTN);
+  drawButton(165, 150, 100, 44, "No thanks", C_GREY_BTN);
+}
+
+// ============================================================
+//   SCREEN: settings
+// ============================================================
+void updateSettings(float dt) {
+  scrollX += 20 * dt;
+  if (!tPressed) return;
+  if (inRect(tx, ty, 20, 50, 135, 56)) {
+    mode = (mode + 1) % 3;
+    prefs.putUChar("mode", mode);
+    playSound(SND(SND_CLICK));
+  } else if (inRect(tx, ty, 165, 50, 135, 56)) {
+    volume = (volume + 1) % 3;
+    prefs.putUChar("vol", volume);
+    playSound(SND(SND_SELECT));
+  } else if (inRect(tx, ty, 20, 116, 135, 56)) {
+    musicOn = !musicOn;
+    prefs.putUChar("mus", musicOn);
+    playSound(SND(SND_SELECT));
+  } else if (inRect(tx, ty, 165, 116, 135, 56)) {
+    brightness = (brightness + 1) % 3;
+    prefs.putUChar("bri", brightness);
+    ledcWrite(BL_CH, BRIGHT_LEVELS[brightness]);
+    playSound(SND(SND_CLICK));
+  } else if (inRect(tx, ty, 110, 190, 100, 40)) {
+    playSound(SND(SND_CLICK));
+    state = ST_TITLE;
+    lockInput(250);
+  }
+}
+
+void drawSettings() {
+  drawBackground();
+  shadowText("Settings", W / 2, 22, 4, C_GOLD);
+  drawButton2(20, 50, 135, 56, "SPEED", MODES[mode].name, RGB(200, 100, 30));
+  drawButton2(165, 50, 135, 56, "SOUND", VOL_NAMES[volume], C_BLUE_BTN);
+  drawButton2(20, 116, 135, 56, "MUSIC", musicOn ? "On" : "Off", C_TEAL_BTN);
+  drawButton2(165, 116, 135, 56, "BRIGHTNESS", BRIGHT_NAMES[brightness], C_PURPLE_BTN);
+  drawButton(110, 190, 100, 40, "Back", C_GREEN_BTN);
+  textAt("v" GAME_VERSION, W - 8, 226, 2, C_WHITE, MR_DATUM);
+}
+
+// ============================================================
+//   SCREEN: stickers
+// ============================================================
+void stickerCell(int i, int& cx, int& cy) { cx = 28 + (i % 7) * 44; cy = 62 + (i / 7) * 50; }
+
+void updateStickers(float dt) {
+  scrollX += 20 * dt;
+  if (!tPressed) return;
+  for (int i = 0; i < N_STICKERS; i++) {
+    int cx, cy;
+    stickerCell(i, cx, cy);
+    if (inRect(tx, ty, cx - 22, cy - 24, 44, 48)) { stickerSel = i; playSound(SND(SND_CLICK)); return; }
+  }
+  if (inRect(tx, ty, 110, 196, 100, 38)) {
+    playSound(SND(SND_CLICK));
+    state = ST_TITLE;
+    lockInput(250);
+  }
+}
+
+void drawStickers() {
+  drawBackground();
+  shadowText("Stickers", 70, 18, 4, C_GOLD);
+  char buf[48];
+  snprintf(buf, sizeof(buf), "%d of %d", countBits(P().stickers), N_STICKERS);
+  textAt(buf, W - 10, 18, 2, C_WHITE, MR_DATUM);
+  for (int i = 0; i < N_STICKERS; i++) {
+    int cx, cy;
+    stickerCell(i, cx, cy);
+    if (i == stickerSel) { fb.drawCircle(cx, cy, 21, C_GOLD); fb.drawCircle(cx, cy, 22, C_GOLD); }
+    drawStickerBadge(cx, cy, 18, i, stickerEarned(i));
+  }
+  const Sticker& st = STICKERS[stickerSel];
+  shadowText(st.name, W / 2, 146, 4, C_WHITE);
+  shadowText(st.desc, W / 2, 168, 2, C_WHITE);
+  if (stickerEarned(stickerSel)) {
+    snprintf(buf, sizeof(buf), "Earned! (+%d coins)", st.reward);
+  } else {
+    uint32_t pr = stickerProgress(stickerSel);
+    if (pr > st.target) pr = st.target;
+    snprintf(buf, sizeof(buf), "%lu / %lu   Reward: %d coins", (unsigned long)pr, (unsigned long)st.target, st.reward);
+  }
+  shadowText(buf, W / 2, 184, 2, C_GOLD);
+  drawButton(110, 196, 100, 38, "Back", C_BLUE_BTN);
 }
 
 // ============================================================
@@ -2381,9 +2718,9 @@ void shopAction(int btn) {
       break;
     }
     case 1: {  // shop skins
-      int si = FIRST_SHOP_SKIN + idx;
+      int si = SHOP_SKIN_LIST[idx];
       if (!skinUnlocked(si)) {
-        if (tryBuy(1, SKINS[si].price)) { p.skinsOwned |= (1UL << idx); p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); shopSay("So shiny!"); }
+        if (tryBuy(1, SKINS[si].price)) { p.skinsOwned |= (1UL << (si - FIRST_SHOP_SKIN)); p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); shopSay("So shiny!"); }
       } else {
         p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); playSound(SND(SND_SELECT));
       }
@@ -2439,13 +2776,16 @@ void updateShop(float dt) {
   } else if (inRect(tx, ty, 96, 190, 218, 42)) {
     btn = 1;
   }
-  if (btn) shopAction(btn);
+  if (btn) { shopAction(btn); checkStickers(); }   // e.g. "Own 5 hats"
   else buyArmed = 0;
 }
 
+int priceHintLevel = 0;   // when set, the price line adds "or finish level N"
+
 void drawPriceLine(int price, int y) {
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%d coins", price);
+  char buf[40];
+  if (priceHintLevel > 0) snprintf(buf, sizeof(buf), "%d coins  (or finish level %d)", price, priceHintLevel);
+  else                    snprintf(buf, sizeof(buf), "%d coins", price);
   int tw = fb.textWidth(buf, 2);
   drawCoinIcon(W / 2 - tw / 2 - 9, y, 5);
   shadowText(buf, W / 2 + 3, y, 2, C_GOLD);
@@ -2482,6 +2822,7 @@ void drawShop() {
   uint16_t col1 = C_GREEN_BTN, col2 = C_GREEN_BTN;
   int price = -1;
   const char* info = nullptr;
+  priceHintLevel = 0;
 
   switch (shopTab) {
     case 0: {
@@ -2494,10 +2835,10 @@ void drawShop() {
       break;
     }
     case 1: {
-      int si = FIRST_SHOP_SKIN + idx;
+      int si = SHOP_SKIN_LIST[idx];
       drawAxolotl(160, 116, 2, gameT, SKINS[si], false, profHat(p));
       name = SKINS[si].name;
-      if (!skinUnlocked(si)) { price = SKINS[si].price; label1 = buyArmed ? "Tap again to buy!" : "Buy"; col1 = buyArmed ? C_RED_BTN : (p.coins >= SKINS[si].price ? C_GREEN_BTN : C_GREY_BTN); }
+      if (!skinUnlocked(si)) { price = SKINS[si].price; if (!isShopOnly(si)) priceHintLevel = SKINS[si].lvl; label1 = buyArmed ? "Tap again to buy!" : "Buy"; col1 = buyArmed ? C_RED_BTN : (p.coins >= SKINS[si].price ? C_GREEN_BTN : C_GREY_BTN); }
       else if (p.skin == si && p.character == CH_AXOLOTL) { info = "You're wearing it!"; label1 = "Wearing"; col1 = C_GREY_BTN; }
       else { info = "You own this skin"; label1 = "Wear it"; col1 = C_PURPLE_BTN; }
       break;
@@ -2614,7 +2955,7 @@ void setup() {
   tft.init();
   tft.setRotation(1);            // landscape; try 3 if the picture is upside down
   tft.fillScreen(TFT_BLACK);
-  backlightInit();
+  backlightInit();   // (brightness setting is applied once it's loaded below)
 
   touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   touch.begin(touchSPI);
@@ -2632,6 +2973,9 @@ void setup() {
   loadSaved();
   volume = prefs.getUChar("vol", 2);
   mode   = prefs.getUChar("mode", 0);
+  musicOn = prefs.getUChar("mus", 1) != 0;
+  brightness = prefs.getUChar("bri", 2);
+  if (brightness > 2) brightness = 2;
   if (volume > 2) volume = 2;
   if (mode > 2) mode = 0;
   int last = prefs.getUChar("last", 0);
@@ -2644,6 +2988,7 @@ void setup() {
   else if (n == 1) state = ST_TITLE;
   else             state = ST_PROFILES;
 
+  ledcWrite(BL_CH, BRIGHT_LEVELS[brightness]);
   speakerInit();
   xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 1, nullptr, 0);
 
@@ -2665,6 +3010,9 @@ void drawFrame() {
     case ST_SKINS:    drawSkins();    break;
     case ST_SCORES:   drawScores();   break;
     case ST_SHOP:     drawShop();     break;
+    case ST_STICKERS: drawStickers(); break;
+    case ST_SETTINGS: drawSettings(); break;
+    case ST_REVIVE:   drawRevive();   break;
     case ST_READY:    drawReady();    break;
     case ST_PLAY:     drawGame(); drawHUD(true); break;
     case ST_PAUSE:    drawPause();    break;
@@ -2672,6 +3020,7 @@ void drawFrame() {
     case ST_OVER:     drawOver();     break;
   }
   drawSparksAndText();
+  drawStickerBanner();
 
   if (TOUCH_DEBUG && tDown) {
     fb.fillCircle(tx, ty, 4, TFT_RED);
@@ -2696,7 +3045,7 @@ void loop() {
   if (tDown || state == ST_PLAY || state == ST_READY) lastActivityMs = now;
   if (dimmed && tDown) {
     dimmed = false;
-    ledcWrite(BL_CH, BRIGHT_FULL);
+    ledcWrite(BL_CH, BRIGHT_LEVELS[brightness]);
     tPressed = false;
     lockInput(300);
   } else if (!dimmed && now - lastActivityMs > DIM_AFTER_MS) {
@@ -2714,6 +3063,9 @@ void loop() {
     case ST_SKINS:    updateSkins(dt);    break;
     case ST_SCORES:   updateScores(dt);   break;
     case ST_SHOP:     updateShop(dt);     break;
+    case ST_STICKERS: updateStickers(dt); break;
+    case ST_SETTINGS: updateSettings(dt); break;
+    case ST_REVIVE:   updateRevive();     break;
     case ST_READY:    updateReady(dt);    break;
     case ST_PLAY:     updatePlay(dt);     break;
     case ST_PAUSE:    updatePause();      break;
@@ -2721,6 +3073,8 @@ void loop() {
     case ST_OVER:     updateOver(dt);     break;
   }
 
+  updateStickerBanner(dt);
+  musicWanted = (state == ST_PLAY);
   float worldSpd = 0;
   if (state == ST_PLAY) worldSpd = speed;
   else if (state == ST_TITLE || state == ST_PROFILES) worldSpd = 35;
