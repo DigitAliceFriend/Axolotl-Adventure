@@ -1,6 +1,6 @@
 # 🦎 Axolotl Adventure
 
-**by AliceFriend**
+**by AliceFriend** · version 1.1 (see [CHANGELOG.md](CHANGELOG.md))
 
 A cheerful underwater side-scroller for kids, made for the ESP32 **"Cheap Yellow Display"** (CYD). Guide your axolotl through the water, dodge rocks, seaweed and fish, eat worms, pop bubbles, and swim through level after level to unlock new axolotl skins.
 
@@ -66,7 +66,9 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 | 6 and up | 100 more than the level before (300, 400, 500, ...) |
 
 - The speed stays the same on every level. Later levels just take longer.
-- The scenery changes each level: Sunny Lagoon, Coral Reef, Sunset Bay, Deep Sea, then back to the start.
+- The scenery changes each level: Sunny Lagoon, Coral Reef, Sunset Cove, Kelp Forest and Deep Sea, then back to the start.
+- **Sunny Lagoon** and **Coral Reef** are shallow: the water stops partway up and there's open sky above, which you can't swim into. Hanging rocks become floating logs, and everything is scaled to fit, so there's always room to swim.
+- **Sunset Cove** has the sun shining down through the water, blurry and wobbling with the waves.
 - Hearts refill at the start of each level.
 - If you run out of hearts, you try the same level again. You never lose a level you've finished.
 - Your score keeps adding up across levels until you run out of hearts or go back to the menu.
@@ -75,9 +77,9 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 
 - **Player profiles.** Up to 6 players, each with their own name, level, skins and best score. Everything is saved and survives power-off.
 - **Leaderboard.** The top 10 scores, with player names and the level reached.
-- **27 axolotl skins**: 19 unlocked one per level finished (with a **NEW!** badge until you've looked at them) and 8 special ones in the Shop
+- **35 axolotl skins**: 27 unlocked one per level finished, including a pastel collection, (with a **NEW!** badge until you've looked at them) and 8 special ones in the Shop
 - **Coins, a Shop, hats, shields and helper friends**, plus four friends you can play as
-- **Four underwater places** that take turns level by level: Sunny Lagoon, Coral Reef, Sunset Bay and Deep Sea
+- **Five underwater places** that take turns level by level: Sunny Lagoon, Coral Reef, Sunset Cove, Kelp Forest and Deep Sea
 - **Pause menu.** Change your skin or sound volume in the middle of a game, then keep swimming. Quitting needs two taps, so little fingers don't end a game by accident.
 - **Three speeds:** Easy (5 hearts), Normal and Zoom!
 - **Kid-friendly design:** hearts instead of instant game over, forgiving hitboxes, a short safe time after each bump, and lots of cheering
@@ -111,6 +113,14 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 | Twilight (dark rainbow) | Finish level 16 |
 | Tangerine (bright orange) | Finish level 17 |
 | Slate (dark gray) | Finish level 18 |
+| Blossom (pastel pink) | Finish level 19 |
+| Peach (pastel peach) | Finish level 20 |
+| Butter (pastel yellow) | Finish level 21 |
+| Pistachio (pastel green) | Finish level 22 |
+| Seafoam (pastel aqua) | Finish level 23 |
+| Baby Blue (pastel blue) | Finish level 24 |
+| Lilac (pastel purple) | Finish level 25 |
+| Dusky (fades between blue, pink and purple) | Finish level 26 |
 
 **Shop skins:** Glitter (sparkly pink), Frosty (sparkly ice blue), Cotton Candy (pastel pink and blue), Glow (glowing green), Disco (flashes pink and blue), Lava (glowing orange and red), Galaxy (twinkling stars) and Golden (sparkly gold). Flashing effects swap colours less than twice a second, so they stay gentle on the eyes.
 
@@ -167,8 +177,9 @@ Most settings are near the top of `AxolotlAdventure.ino`:
 - `levelGoal()` sets the points needed for each level
 - `IMPULSE`, `SWIM_ACC` and `MAX_VY` change how the axolotl swims
 - `MODES[]` sets the speed, obstacle spacing and hearts for Easy, Normal and Zoom!
-- `SKINS[]` sets the skin colours. Their order is the unlock order. Add new skins to the end so saved players keep the skins they've earned.
-- `THEMES[]` sets the colours of each underwater place
+- `SKINS[]` sets the skin colours. Each level skin's last number is the level that unlocks it. Add new skins to the **end** of the list so saved players keep the skins they've earned.
+- `THEMES[]` sets the colours of each underwater place, and whether it's shallow (`TK_SHALLOW`), has the sunset sun (`TK_SUNSET`), kelp (`TK_KELP`) or is plain deep water (`TK_DEEP`)
+- `GAME_VERSION` is the version number shown on the title screen
 - `DIM_AFTER_MS`, `BRIGHT_FULL` and `BRIGHT_DIM` control the screen dimming
 - The `SND_...` arrays hold the sound effects as lists of `{frequency in Hz, length in ms}`
 

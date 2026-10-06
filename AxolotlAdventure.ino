@@ -1,6 +1,7 @@
 /*
  * ============================================================
  *              AXOLOTL ADVENTURE  by AliceFriend
+ *                       version 1.1
  * ============================================================
  *  For the original "Cheap Yellow Display" (ESP32-2432S028R)
  *  ILI9341 320x240 screen + XPT2046 touch + speaker + RGB LED
@@ -72,7 +73,8 @@ enum Fx : uint8_t {
   FX_FLASH,     // swaps between two colours (gently, under 2 times a second)
   FX_PULSE,     // glows brighter and darker
   FX_STARS,     // little stars twinkle across it
-  FX_SHIFT      // slowly blends between two colours
+  FX_SHIFT,     // slowly blends between two colours
+  FX_DUSK       // fades blue -> pink -> purple (the "Dusky" skin)
 };
 
 struct Skin {
@@ -81,6 +83,7 @@ struct Skin {
   uint8_t  fx;
   uint16_t alt;         // second colour for effects
   uint16_t price;       // 0 = unlocked by levels, otherwise bought in the shop
+  uint8_t  lvl;         // level skins: unlocked after finishing this many levels
 };
 
 enum HatStyle : uint8_t { HAT_BEANIE, HAT_PARTY, HAT_TOP, HAT_CAP, HAT_BOW, HAT_CROWN, HAT_SANTA, HAT_WIZARD };
@@ -146,6 +149,8 @@ struct ScoreEntry {
   uint16_t level;
   uint32_t score;
 };
+
+#define GAME_VERSION "1.1"   // shown next to the title (see CHANGELOG.md)
 
 // ---------------- Hardware pins (original CYD) ----------------
 #define XPT2046_IRQ   36
@@ -262,17 +267,32 @@ const uint16_t C_TEAL_BTN    = RGB(20, 150, 160);
 const uint16_t C_RED_BTN     = RGB(210, 60, 60);
 const uint16_t C_GREY_BTN    = RGB(110, 110, 125);
 // Each level gets a new underwater place (looks only - the speed never changes)
-struct Theme { const char* name; uint16_t water[6]; uint16_t hill, sand, sandDark; };
-const Theme THEMES[4] = {
-  {"Sunny Lagoon", {RGB(120, 215, 240), RGB(90, 195, 230), RGB(60, 170, 220), RGB(40, 145, 205), RGB(30, 120, 185), RGB(20, 95, 165)},
-   RGB(20, 90, 125), RGB(240, 210, 140), RGB(200, 165, 100)},
-  {"Coral Reef",   {RGB(110, 225, 215), RGB(80, 205, 200), RGB(55, 180, 190), RGB(40, 155, 175), RGB(30, 130, 160), RGB(20, 105, 145)},
-   RGB(230, 110, 130), RGB(250, 225, 170), RGB(215, 180, 120)},
-  {"Sunset Bay",   {RGB(255, 190, 140), RGB(240, 160, 150), RGB(200, 130, 170), RGB(150, 105, 180), RGB(100, 85, 170), RGB(60, 60, 150)},
-   RGB(70, 50, 120), RGB(235, 195, 150), RGB(195, 150, 110)},
-  {"Deep Sea",     {RGB(40, 90, 160), RGB(30, 75, 140), RGB(25, 60, 120), RGB(20, 48, 100), RGB(15, 38, 85), RGB(10, 28, 70)},
-   RGB(20, 40, 75), RGB(150, 140, 120), RGB(115, 105, 90)},
+enum ThemeKind : uint8_t {
+  TK_DEEP,      // water all the way to the top
+  TK_SHALLOW,   // low water: sky above the 2nd colour line, and you can't swim up there
+  TK_SUNSET,    // a sun shining down, wobbly through the water
+  TK_KELP       // tall kelp swaying in the background
 };
+struct Theme {
+  const char* name;
+  uint16_t water[6];
+  uint16_t hill, sand, sandDark;
+  uint8_t  kind;
+  uint16_t skyTop, skyBottom;
+};
+const Theme THEMES[] = {
+  {"Sunny Lagoon", {RGB(120, 215, 240), RGB(90, 195, 230), RGB(60, 170, 220), RGB(40, 145, 205), RGB(30, 120, 185), RGB(20, 95, 165)},
+   RGB(20, 90, 125), RGB(240, 210, 140), RGB(200, 165, 100), TK_SHALLOW, RGB(130, 200, 255), RGB(215, 240, 255)},
+  {"Coral Reef",   {RGB(110, 225, 215), RGB(80, 205, 200), RGB(55, 180, 190), RGB(40, 155, 175), RGB(30, 130, 160), RGB(20, 105, 145)},
+   RGB(230, 110, 130), RGB(250, 225, 170), RGB(215, 180, 120), TK_SHALLOW, RGB(110, 190, 255), RGB(200, 235, 255)},
+  {"Sunset Cove",  {RGB(255, 190, 140), RGB(240, 160, 150), RGB(200, 130, 170), RGB(150, 105, 180), RGB(100, 85, 170), RGB(60, 60, 150)},
+   RGB(70, 50, 120), RGB(235, 195, 150), RGB(195, 150, 110), TK_SUNSET, 0, 0},
+  {"Kelp Forest",  {RGB(110, 200, 170), RGB(85, 180, 150), RGB(65, 160, 135), RGB(50, 140, 120), RGB(38, 118, 102), RGB(28, 95, 85)},
+   RGB(30, 90, 60), RGB(200, 190, 140), RGB(160, 150, 105), TK_KELP, 0, 0},
+  {"Deep Sea",     {RGB(40, 90, 160), RGB(30, 75, 140), RGB(25, 60, 120), RGB(20, 48, 100), RGB(15, 38, 85), RGB(10, 28, 70)},
+   RGB(20, 40, 75), RGB(150, 140, 120), RGB(115, 105, 90), TK_DEEP, 0, 0},
+};
+const int N_THEMES = sizeof(THEMES) / sizeof(THEMES[0]);
 const uint16_t FISH_COLORS[3] = { RGB(255, 140, 40), RGB(255, 220, 50), RGB(190, 110, 235) };
 
 // ---------------- Skins ----------------
@@ -280,38 +300,58 @@ const uint16_t FISH_COLORS[3] = { RGB(255, 140, 40), RGB(255, 220, 50), RGB(190,
 // Shop skins come after them and are bought with coins.
 //  name        body               belly              gills              eyes               effect      2nd colour         price
 const Skin SKINS[] = {
-  {"Pinky",    RGB(255, 160, 190), RGB(255, 215, 230), RGB(235, 70, 130),  C_BLACK,           FX_NONE,    0, 0},  // free
-  {"Goldie",   RGB(255, 205, 70),  RGB(255, 240, 170), RGB(255, 120, 30),  C_BLACK,           FX_NONE,    0, 0},  // level 1
-  {"Wild",     RGB(105, 120, 70),  RGB(160, 175, 110), RGB(75, 60, 35),    RGB(230, 190, 40), FX_NONE,    0, 0},  // level 2
-  {"Sky",      RGB(90, 150, 255),  RGB(175, 205, 255), RGB(40, 70, 200),   C_BLACK,           FX_NONE,    0, 0},  // level 3
-  {"Minty",    RGB(110, 225, 160), RGB(200, 255, 220), RGB(30, 150, 90),   C_BLACK,           FX_NONE,    0, 0},  // level 4
-  {"Magenta",  RGB(235, 60, 190),  RGB(255, 160, 225), RGB(160, 20, 130),  C_BLACK,           FX_NONE,    0, 0},  // level 5
-  {"Cyan",     RGB(60, 220, 235),  RGB(180, 245, 250), RGB(0, 140, 170),   C_BLACK,           FX_NONE,    0, 0},  // level 6
-  {"Lavender", RGB(190, 160, 240), RGB(225, 210, 255), RGB(140, 90, 210),  C_BLACK,           FX_NONE,    0, 0},  // level 7
-  {"White",    RGB(245, 245, 250), RGB(220, 225, 240), RGB(255, 140, 170), C_BLACK,           FX_NONE,    0, 0},  // level 8
-  {"Midnight", RGB(90, 60, 165),   RGB(150, 120, 220), RGB(255, 120, 220), C_WHITE,           FX_NONE,    0, 0},  // level 9
-  {"Rainbow",  0, 0, 0,                                                     C_BLACK,           FX_RAINBOW, 0, 0},  // level 10
-  {"Ruby",     RGB(230, 50, 50),   RGB(255, 140, 130), RGB(150, 15, 30),   C_BLACK,           FX_NONE,    0, 0},  // level 11 (red)
-  {"Lemon",    RGB(255, 240, 60),  RGB(255, 250, 180), RGB(240, 175, 0),   C_BLACK,           FX_NONE,    0, 0},  // level 12 (yellow)
-  {"Cloud",    RGB(200, 200, 210), RGB(235, 235, 242), RGB(140, 145, 170), C_BLACK,           FX_NONE,    0, 0},  // level 13 (light gray)
-  {"Shadow",   RGB(25, 25, 32),    RGB(55, 55, 68),    RGB(95, 65, 120),   RGB(235, 195, 40), FX_NONE,    0, 0},  // level 14 (deep black)
-  {"Forest",   RGB(30, 100, 50),   RGB(70, 145, 85),   RGB(15, 60, 30),    RGB(235, 195, 40), FX_NONE,    0, 0},  // level 15 (dark green)
-  {"Twilight", 0, 0, 0,                                                     C_WHITE,           FX_DARKBOW, 0, 0},  // level 16 (dark rainbow)
-  {"Tangerine",RGB(255, 120, 0),   RGB(255, 195, 120), RGB(200, 70, 0),    C_BLACK,           FX_NONE,    0, 0},  // level 17 (bright orange)
-  {"Slate",    RGB(85, 88, 95),    RGB(125, 128, 135), RGB(55, 58, 65),    RGB(235, 195, 40), FX_NONE,    0, 0},  // level 18 (dark gray)
+  {"Pinky",    RGB(255, 160, 190), RGB(255, 215, 230), RGB(235, 70, 130),  C_BLACK,           FX_NONE,    0, 0, 0},  // free
+  {"Goldie",   RGB(255, 205, 70),  RGB(255, 240, 170), RGB(255, 120, 30),  C_BLACK,           FX_NONE,    0, 0, 1},  // level 1
+  {"Wild",     RGB(105, 120, 70),  RGB(160, 175, 110), RGB(75, 60, 35),    RGB(230, 190, 40), FX_NONE,    0, 0, 2},  // level 2
+  {"Sky",      RGB(90, 150, 255),  RGB(175, 205, 255), RGB(40, 70, 200),   C_BLACK,           FX_NONE,    0, 0, 3},  // level 3
+  {"Minty",    RGB(110, 225, 160), RGB(200, 255, 220), RGB(30, 150, 90),   C_BLACK,           FX_NONE,    0, 0, 4},  // level 4
+  {"Magenta",  RGB(235, 60, 190),  RGB(255, 160, 225), RGB(160, 20, 130),  C_BLACK,           FX_NONE,    0, 0, 5},  // level 5
+  {"Cyan",     RGB(60, 220, 235),  RGB(180, 245, 250), RGB(0, 140, 170),   C_BLACK,           FX_NONE,    0, 0, 6},  // level 6
+  {"Lavender", RGB(190, 160, 240), RGB(225, 210, 255), RGB(140, 90, 210),  C_BLACK,           FX_NONE,    0, 0, 7},  // level 7
+  {"White",    RGB(245, 245, 250), RGB(220, 225, 240), RGB(255, 140, 170), C_BLACK,           FX_NONE,    0, 0, 8},  // level 8
+  {"Midnight", RGB(90, 60, 165),   RGB(150, 120, 220), RGB(255, 120, 220), C_WHITE,           FX_NONE,    0, 0, 9},  // level 9
+  {"Rainbow",  0, 0, 0,                                                     C_BLACK,           FX_RAINBOW, 0, 0, 10},  // level 10
+  {"Ruby",     RGB(230, 50, 50),   RGB(255, 140, 130), RGB(150, 15, 30),   C_BLACK,           FX_NONE,    0, 0, 11},  // level 11 (red)
+  {"Lemon",    RGB(255, 240, 60),  RGB(255, 250, 180), RGB(240, 175, 0),   C_BLACK,           FX_NONE,    0, 0, 12},  // level 12 (yellow)
+  {"Cloud",    RGB(200, 200, 210), RGB(235, 235, 242), RGB(140, 145, 170), C_BLACK,           FX_NONE,    0, 0, 13},  // level 13 (light gray)
+  {"Shadow",   RGB(25, 25, 32),    RGB(55, 55, 68),    RGB(95, 65, 120),   RGB(235, 195, 40), FX_NONE,    0, 0, 14},  // level 14 (deep black)
+  {"Forest",   RGB(30, 100, 50),   RGB(70, 145, 85),   RGB(15, 60, 30),    RGB(235, 195, 40), FX_NONE,    0, 0, 15},  // level 15 (dark green)
+  {"Twilight", 0, 0, 0,                                                     C_WHITE,           FX_DARKBOW, 0, 0, 16},  // level 16 (dark rainbow)
+  {"Tangerine",RGB(255, 120, 0),   RGB(255, 195, 120), RGB(200, 70, 0),    C_BLACK,           FX_NONE,    0, 0, 17},  // level 17 (bright orange)
+  {"Slate",    RGB(85, 88, 95),    RGB(125, 128, 135), RGB(55, 58, 65),    RGB(235, 195, 40), FX_NONE,    0, 0, 18},  // level 18 (dark gray)
   // ---- shop skins ----
-  {"Glitter",  RGB(255, 170, 215), RGB(255, 225, 240), RGB(240, 90, 170),  C_BLACK, FX_SPARKLE, C_WHITE,            60},
-  {"Frosty",   RGB(190, 235, 255), RGB(235, 250, 255), RGB(120, 190, 240), C_BLACK, FX_SPARKLE, C_WHITE,            60},
-  {"Cotton Candy", RGB(255, 185, 215), RGB(255, 235, 245), RGB(170, 210, 255), C_BLACK, FX_SHIFT, RGB(175, 215, 255), 60},
-  {"Glow",     RGB(90, 255, 120),  RGB(200, 255, 210), RGB(20, 170, 60),   C_BLACK, FX_PULSE,   RGB(20, 140, 60),   70},
-  {"Disco",    RGB(255, 80, 200),  RGB(255, 200, 240), RGB(120, 60, 255),  C_BLACK, FX_FLASH,   RGB(60, 220, 255),  70},
-  {"Lava",     RGB(255, 90, 0),    RGB(255, 190, 90),  RGB(180, 20, 0),    C_BLACK, FX_PULSE,   RGB(220, 20, 20),   80},
-  {"Galaxy",   RGB(45, 25, 95),    RGB(80, 55, 140),   RGB(255, 120, 230), C_WHITE, FX_STARS,   RGB(255, 255, 200), 90},
-  {"Golden",   RGB(255, 200, 40),  RGB(255, 235, 140), RGB(230, 140, 0),   C_BLACK, FX_SPARKLE, RGB(255, 255, 220), 100},
+  {"Glitter",  RGB(255, 170, 215), RGB(255, 225, 240), RGB(240, 90, 170),  C_BLACK, FX_SPARKLE, C_WHITE, 60, 0},
+  {"Frosty",   RGB(190, 235, 255), RGB(235, 250, 255), RGB(120, 190, 240), C_BLACK, FX_SPARKLE, C_WHITE, 60, 0},
+  {"Cotton Candy", RGB(255, 185, 215), RGB(255, 235, 245), RGB(170, 210, 255), C_BLACK, FX_SHIFT, RGB(175, 215, 255), 60, 0},
+  {"Glow",     RGB(90, 255, 120),  RGB(200, 255, 210), RGB(20, 170, 60),   C_BLACK, FX_PULSE,   RGB(20, 140, 60), 70, 0},
+  {"Disco",    RGB(255, 80, 200),  RGB(255, 200, 240), RGB(120, 60, 255),  C_BLACK, FX_FLASH,   RGB(60, 220, 255), 70, 0},
+  {"Lava",     RGB(255, 90, 0),    RGB(255, 190, 90),  RGB(180, 20, 0),    C_BLACK, FX_PULSE,   RGB(220, 20, 20), 80, 0},
+  {"Galaxy",   RGB(45, 25, 95),    RGB(80, 55, 140),   RGB(255, 120, 230), C_WHITE, FX_STARS,   RGB(255, 255, 200), 90, 0},
+  {"Golden",   RGB(255, 200, 40),  RGB(255, 235, 140), RGB(230, 140, 0),   C_BLACK, FX_SPARKLE, RGB(255, 255, 220), 100, 0},
+  // ---- pastel collection (unlocked by levels; added at the end so saves stay correct) ----
+  {"Blossom",   RGB(255, 200, 215), RGB(255, 235, 240), RGB(240, 150, 180), C_BLACK, FX_NONE, 0, 0, 19},  // pastel pink
+  {"Peach",     RGB(255, 205, 170), RGB(255, 235, 215), RGB(240, 150, 120), C_BLACK, FX_NONE, 0, 0, 20},  // pastel peach
+  {"Butter",    RGB(255, 240, 170), RGB(255, 250, 222), RGB(235, 200, 110), C_BLACK, FX_NONE, 0, 0, 21},  // pastel yellow
+  {"Pistachio", RGB(200, 235, 180), RGB(230, 250, 215), RGB(140, 195, 125), C_BLACK, FX_NONE, 0, 0, 22},  // pastel green
+  {"Seafoam",   RGB(175, 235, 220), RGB(220, 250, 242), RGB(110, 195, 180), C_BLACK, FX_NONE, 0, 0, 23},  // pastel aqua
+  {"Baby Blue", RGB(180, 210, 255), RGB(225, 238, 255), RGB(120, 160, 230), C_BLACK, FX_NONE, 0, 0, 24},  // pastel blue
+  {"Lilac",     RGB(215, 190, 245), RGB(238, 225, 252), RGB(165, 130, 215), C_BLACK, FX_NONE, 0, 0, 25},  // pastel purple
+  {"Dusky",     RGB(95, 125, 210),  RGB(220, 210, 240), RGB(130, 90, 190),  C_BLACK, FX_DUSK, 0, 0, 26},  // fades blue, pink, purple
 };
 const int N_SKINS = sizeof(SKINS) / sizeof(SKINS[0]);
-const int LEVEL_SKINS = 19;                     // the first 19 unlock by levels
-const int N_SHOP_SKINS = N_SKINS - LEVEL_SKINS;
+const int FIRST_SHOP_SKIN = 19;                 // shop skins are SKINS[19] to SKINS[26]
+const int N_SHOP_SKINS = 8;
+const int MAX_SKIN_LEVEL = 26;                  // the last level that unlocks a skin
+int SKIN_ORDER[N_SKINS];                        // skin screen order: by unlock level, then shop skins
+
+void buildSkinOrder() {
+  int n = 0;
+  for (int l = 0; l <= MAX_SKIN_LEVEL; l++)
+    for (int i = 0; i < N_SKINS; i++)
+      if (SKINS[i].price == 0 && SKINS[i].lvl == l) SKIN_ORDER[n++] = i;
+  for (int i = 0; i < N_SKINS; i++)
+    if (SKINS[i].price > 0) SKIN_ORDER[n++] = i;
+}
 
 // ---------------- Hats (bought in the shop) ----------------
 //  name                 style        colour             2nd colour          effect      price
@@ -556,6 +596,7 @@ int   overRank = -1, confirmIdx = -1;
 bool  runActive = false, newRecord = false, deleteMode = false, quitArmed = false;
 const char* overMsg = "";
 const char* newSkinName = nullptr;
+int   newSkinIdx = -1;
 char  nameBuf[NAME_LEN + 1];
 int   nameLen = 0;
 uint32_t lastMs = 0, lastActivityMs = 0;
@@ -577,8 +618,8 @@ void saveProfile(int i) {
 void saveScores() { prefs.putBytes("lb", scores, sizeof(scores)); }
 
 bool skinOwnedBy(const Profile& p, int i) {
-  if (i < LEVEL_SKINS) return i < p.unlocked;
-  return (p.skinsOwned >> (i - LEVEL_SKINS)) & 1;
+  if (SKINS[i].price > 0) return (p.skinsOwned >> (i - FIRST_SHOP_SKIN)) & 1;
+  return p.level - 1 >= SKINS[i].lvl;          // levels finished
 }
 
 void loadSaved() {
@@ -590,10 +631,8 @@ void loadSaved() {
     if (prefs.isKey(key)) prefs.getBytes(key, &p, sizeof(Profile));
     p.name[NAME_LEN] = 0;
     if (p.used != 1) { memset(&p, 0, sizeof(Profile)); continue; }
-    if (p.unlocked < 1) p.unlocked = 1;
-    if (p.unlocked > LEVEL_SKINS) p.unlocked = LEVEL_SKINS;
-    if (p.seen > p.unlocked) p.seen = p.unlocked;
     if (p.level < 1) p.level = 1;
+    if (p.seen > p.level) p.seen = p.level;
     if (p.skin >= N_SKINS || !skinOwnedBy(p, p.skin)) p.skin = 0;
     if (p.hat > N_HATS || (p.hat && !((p.hatsOwned >> (p.hat - 1)) & 1))) p.hat = 0;
     if (p.character > N_FRIENDS || (p.character && !((p.friendsOwned >> (p.character - 1)) & 1))) p.character = 0;
@@ -724,7 +763,14 @@ void drawNewBadge(int x, int y) {
   fb.drawString("NEW!", x + 19, y + 9, 2);
 }
 
-bool hasNewSkins() { return cur >= 0 && P().seen < P().unlocked; }
+// "seen" = (levels finished + 1) when the player last looked at their skins
+int  levelsDone() { return P().level - 1; }
+bool isNewSkin(int i) { return SKINS[i].price == 0 && SKINS[i].lvl >= P().seen && SKINS[i].lvl <= levelsDone(); }
+bool hasNewSkins() {
+  if (cur < 0) return false;
+  for (int i = 0; i < N_SKINS; i++) if (isNewSkin(i)) return true;
+  return false;
+}
 
 void drawHeart(int x, int y, int s, uint16_t c) {
   fb.fillCircle(x - s, y, s, c);
@@ -767,6 +813,12 @@ uint16_t fxColor(uint8_t fx, uint16_t base, uint16_t alt, float t) {
     case FX_FLASH:   return fmodf(t, 0.6f) < 0.3f ? base : alt;
     case FX_PULSE:   return lerp565(base, alt, 0.5f + 0.5f * sinf(t * 4.0f));
     case FX_SHIFT:   return lerp565(base, alt, 0.5f + 0.5f * sinf(t * 1.2f));
+    case FX_DUSK: {  // blue -> pink -> purple -> blue
+      const uint16_t dusk[3] = {RGB(95, 125, 210), RGB(230, 140, 185), RGB(130, 90, 190)};
+      float ph = fmodf(t * 0.35f, 3.0f);
+      int k = (int)ph;
+      return lerp565(dusk[k % 3], dusk[(k + 1) % 3], ph - k);
+    }
     default:         return base;
   }
 }
@@ -872,9 +924,10 @@ void drawHat(int idx, int x, int y, int s, float t) {
 // The star of the show! Facing right. s = scale (1 in game, 2-3 in menus)
 void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = false, int hat = -1) {
   uint16_t body = sk.body, belly = sk.belly, gill = sk.gill, eye = sk.eye;
-  if (sk.fx == FX_FLASH || sk.fx == FX_PULSE || sk.fx == FX_SHIFT) {
+  if (sk.fx == FX_FLASH || sk.fx == FX_PULSE || sk.fx == FX_SHIFT || sk.fx == FX_DUSK) {
     body  = fxColor(sk.fx, sk.body, sk.alt, t);
     belly = lerp565(body, C_WHITE, 0.5f);
+    if (sk.fx == FX_DUSK) gill = darker565(lerp565(body, C_WHITE, 0.2f)) | 0x0841;
   }
   if (sk.fx == FX_RAINBOW) {
     float h = fmodf(t * 0.3f, 1.0f);
@@ -1051,16 +1104,84 @@ void drawCharacter(int ch, int skin, int hat, int cx, int cy, int s, float t) {
   }
 }
 
-int currentTheme() {
-  bool inGame = state == ST_READY || state == ST_PLAY || state == ST_PAUSE || state == ST_CLEAR || state == ST_OVER;
-  return inGame ? (curLevel - 1) % 4 : 0;
+bool inGameState() {
+  return state == ST_READY || state == ST_PLAY || state == ST_PAUSE || state == ST_CLEAR || state == ST_OVER;
+}
+
+int currentTheme() { return inGameState() ? (curLevel - 1) % N_THEMES : 0; }
+
+// Top of the water. 0 normally; on shallow levels it's the 2nd colour line,
+// and everything above it is sky.
+int surfaceY() {
+  if (!inGameState() || THEMES[currentTheme()].kind != TK_SHALLOW) return 0;
+  return 2 * SAND_Y / 6;
+}
+
+// A soft, wobbly disc - like the sun seen through moving water
+void drawWobblyDisc(int cx, int cy, int r, uint16_t c, float wob, float t) {
+  for (int dy = -r; dy <= r; dy++) {
+    int w = (int)(sqrtf((float)(r * r - dy * dy)) * 1.15f);
+    int off = (int)(sinf(dy * 0.35f + t * 2.2f) * wob);
+    fb.drawFastHLine(cx - w + off, cy + dy, 2 * w + 1, c);
+  }
 }
 
 void drawBackground() {
   const Theme& T = THEMES[currentTheme()];
+  int surf = surfaceY();
   for (int i = 0; i < 6; i++) {
     int y0 = i * SAND_Y / 6, y1 = (i + 1) * SAND_Y / 6;
+    if (y1 <= surf) continue;          // that part is sky
     fb.fillRect(0, y0, W, y1 - y0, T.water[i]);
+  }
+
+  if (surf > 0) {
+    // sky
+    for (int y = 0; y < surf; y += 4) fb.fillRect(0, y, W, 4, lerp565(T.skyTop, T.skyBottom, (float)y / surf));
+    fb.fillCircle(290, 50, 13, RGB(255, 240, 150));          // sun
+    fb.fillCircle(290, 50, 10, RGB(255, 225, 90));
+    for (int k = 0; k < 3; k++) {                            // drifting clouds
+      float m = fmodf(k * 130.0f - scrollX * 0.15f, 420.0f);
+      if (m < 0) m += 420.0f;
+      int cx = (int)m - 50, cy = 18 + k * 13;
+      fb.fillEllipse(cx, cy, 18, 6, C_WHITE);
+      fb.fillEllipse(cx - 10, cy + 2, 10, 5, C_WHITE);
+      fb.fillEllipse(cx + 9, cy - 3, 9, 5, C_WHITE);
+    }
+    // gentle waves along the surface
+    for (int x = -4; x < W + 8; x += 8) {
+      int wy = surf + (int)(sinf((x + scrollX) * 0.06f + gameT * 2.0f) * 1.5f);
+      fb.fillCircle(x, wy + 1, 4, T.water[2]);
+      fb.drawFastHLine(x - 2, wy - 2, 5, lerp565(T.water[2], C_WHITE, 0.6f));
+    }
+    // sparkles where the sun hits the water
+    for (int k = 0; k < 5; k++)
+      if (sinf(gameT * 3 + k * 1.7f) > 0.3f) fb.drawFastHLine(262 + k * 10 - (k % 2) * 6, surf + 4 + (k % 3) * 3, 6, C_WHITE);
+  }
+
+  if (T.kind == TK_SUNSET) {
+    // the sun shining down through the water: blurry glow, wobbling with the waves
+    drawWobblyDisc(230, 50, 34, lerp565(T.water[1], RGB(255, 200, 120), 0.35f), 3.0f, gameT);
+    drawWobblyDisc(230, 50, 26, lerp565(T.water[1], RGB(255, 210, 120), 0.65f), 2.5f, gameT + 0.4f);
+    drawWobblyDisc(230, 50, 19, RGB(255, 228, 150), 2.0f, gameT + 0.8f);
+    for (int k = 0; k < 6; k++) {                            // shimmering light below it
+      int y = 90 + k * 10, w = 28 - k * 4;
+      int off = (int)(sinf(gameT * 2.5f + k) * 6);
+      fb.drawFastHLine(230 - w + off, y, 2 * w, lerp565(T.water[2 + k / 2], RGB(255, 220, 160), 0.45f - k * 0.06f));
+    }
+  }
+
+  if (T.kind == TK_KELP) {
+    // tall kelp swaying far away
+    for (int k = 0; k < 6; k++) {
+      float m = fmodf(k * 64.0f - scrollX * 0.4f, 384.0f);
+      if (m < 0) m += 384.0f;
+      int kx = (int)m - 32, top = 30 + (k * 37) % 50;
+      for (int y = SAND_Y; y > top; y -= 7) {
+        int sway = (int)(sinf(gameT * 1.5f + k + y * 0.03f) * (SAND_Y - y) * 0.05f);
+        fb.fillCircle(kx + sway, y, 4, RGB(45, 120, 90));
+      }
+    }
   }
   // far-away hills (slow parallax)
   float s = scrollX * 0.25f;
@@ -1069,7 +1190,8 @@ void drawBackground() {
     fb.fillRect(x, SAND_Y - h, 4, h, T.hill);
   }
   // rising background bubbles
-  for (int i = 0; i < MAX_BG; i++) fb.drawCircle((int)bgb[i].x, (int)bgb[i].y, bgb[i].r, C_BUBBLE);
+  for (int i = 0; i < MAX_BG; i++)
+    if (bgb[i].y > surf + 3) fb.drawCircle((int)bgb[i].x, (int)bgb[i].y, bgb[i].r, C_BUBBLE);
   // sandy floor
   fb.fillRect(0, SAND_Y, W, H - SAND_Y, T.sand);
   fb.fillRect(0, SAND_Y, W, 3, T.sandDark);
@@ -1092,6 +1214,19 @@ void drawRock(const Obstacle& o) {
     fb.fillCircle(x + w / 4, top + h * 3 / 4, 2, C_ROCK_DARK);
     fb.fillCircle(x + w / 3 + 2, top + 2, 3, C_MOSS);
     fb.fillCircle(x + w / 3 + 7, top + 3, 2, C_MOSS);
+  } else if (o.y > 0) {  // shallow water: a floating log with mossy roots hanging down
+    int top = (int)o.y;
+    for (int k = 0; k < 4; k++) {
+      int rx = x + 6 + k * (w - 12) / 3;
+      int len = h - (k % 2) * 8;
+      for (int yy = 0; yy < len; yy += 5) {
+        int sway = (int)(sinf(gameT * 2.0f + o.phase + k + yy * 0.08f) * yy * 0.06f);
+        fb.fillCircle(rx + sway, top + yy, 3 - yy * 2 / (len + 1), (yy / 5) % 2 ? C_WEED : C_WEED_DARK);
+      }
+    }
+    fb.fillRoundRect(x - 4, top - 6, w + 8, 12, 6, RGB(140, 95, 55));      // the log
+    fb.drawFastHLine(x + 2, top - 2, w - 6, RGB(105, 70, 40));
+    fb.fillEllipse(x + w + 2, top, 3, 5, RGB(190, 145, 95));               // cut end
   } else {  // hanging rock from the top
     int bottom = h;
     fb.fillRoundRect(x, -6, w, bottom - r + 6, 6, C_ROCK);
@@ -1317,7 +1452,7 @@ void updateCommon(float dt, float worldSpd) {
     BgBubble& b = bgb[i];
     b.y -= b.spd * dt;
     b.x -= worldSpd * 0.3f * dt;
-    if (b.y < -5 || b.x < -5) { b.y = SAND_Y + frand(0, 20); b.x = frand(0, W + 40); }
+    if (b.y < surfaceY() - 5 || b.x < -5) { b.y = SAND_Y + frand(0, 20); b.x = frand(0, W + 40); }
   }
   for (int i = 0; i < MAX_SPARK; i++) {
     Spark& s = sparks[i];
@@ -1353,7 +1488,7 @@ float shieldTime() { return playerChar() == CH_PUFFER ? 8.0f : 5.0f; }
 
 void startLevel() {
   clearWorld();
-  py = SAND_Y / 2; vy = 0; invuln = 0;
+  vy = 0; invuln = 0;
   levelScore = 0;
   lives = maxLives();              // hearts refill every level
   speed = MODES[mode].speed;
@@ -1361,6 +1496,7 @@ void startLevel() {
   shieldT = 0;
   levelHelper = P().helper ? P().helper - 1 : -1;   // stays until the level is finished
   goReady();
+  py = (surfaceY() + SAND_Y) / 2;   // start in the middle of the water
 }
 
 void startRun() {
@@ -1383,13 +1519,15 @@ void levelComplete() {
   state = ST_CLEAR;
   overT = 0;
   newSkinName = nullptr;
+  newSkinIdx = -1;
   Profile& p = P();
-  int unlockTo = curLevel + 1;
-  if (unlockTo > LEVEL_SKINS) unlockTo = LEVEL_SKINS;
+  if (curLevel >= p.level) {            // first time finishing this level
+    for (int i = 0; i < N_SKINS; i++)
+      if (SKINS[i].price == 0 && SKINS[i].lvl == curLevel) { newSkinIdx = i; newSkinName = SKINS[i].name; }
+  }
   coinBonus = levelCoinBonus(curLevel);
   p.coins += coinBonus;
   if (levelHelper >= 0) p.helper = 0;   // the helper's job is done
-  if (p.unlocked < unlockTo) { p.unlocked = unlockTo; newSkinName = SKINS[unlockTo - 1].name; }
   if (curLevel >= p.level) p.level = curLevel + 1;
   if ((uint32_t)runScore > p.best) p.best = runScore;
   saveProfile(cur);
@@ -1458,24 +1596,31 @@ void spawnObstacle(int gap) {
   Obstacle& o = obs[slot];
   o.on = true; o.passed = false; o.phase = frand(0, 6.28f); o.spd = 0; o.y = 0; o.col = 0;
 
+  // in shallow water everything is scaled down so there's still room to swim
+  int surf = surfaceY();
+  float depth = (float)(SAND_Y - surf) / SAND_Y;
   int r = random(100);
   if (r < 30) {
-    o.type = OB_ROCK; o.w = random(34, 53); o.h = random(28, 71); o.x = W + 10;
+    o.type = OB_ROCK; o.w = random(34, 53); o.h = (int)(random(28, 71) * depth); o.x = W + 10;
+    if (o.h < 22) o.h = 22;
   } else if (r < 55) {
-    o.type = OB_WEED; o.w = 16; o.h = random(60, 116); o.x = W + 20;
+    o.type = OB_WEED; o.w = 16; o.h = (int)(random(60, 116) * depth); o.x = W + 20;
   } else if (r < 82 || levelScore < 4) {
     o.type = OB_FISH; o.w = 24; o.h = 14; o.x = W + 24;
-    o.y = constrain(py + frand(-35, 35), 28.0f, (float)(SAND_Y - 24));  // fish aim near you
+    float fishTop = surf > 0 ? surf + 14.0f : 28.0f;
+    o.y = constrain(py + frand(-35, 35), fishTop, (float)(SAND_Y - 24));  // fish aim near you
     o.spd = frand(12, 40) * MODES[mode].fishSpeed;
     o.col = FISH_COLORS[random(3)];
   } else {
-    o.type = OB_ROCK_TOP; o.w = random(34, 51); o.h = random(30, 66); o.x = W + 10;
+    o.type = OB_ROCK_TOP; o.w = random(34, 51); o.x = W + 10;
+    o.h = surf > 0 ? random(28, 50) : random(30, 66);   // floating log in shallow water, rock otherwise
+    o.y = surf;
   }
 
   // in the open water after the obstacle: a treat, or a little stack of coins
   int what = random(100);
   if (what >= 55 && what < 85) {
-    float cy0 = frand(50, SAND_Y - 74);
+    float cy0 = frand(surf > 0 ? surf + 18 : 50, SAND_Y - 74);
     for (int k = 0; k < 3; k++) spawnPickup(PK_COIN, o.x + gap / 2.0f, cy0 + k * 18);
   } else if (what < 55) {
     for (int i = 0; i < MAX_PK; i++) {
@@ -1483,7 +1628,7 @@ void spawnObstacle(int gap) {
       Pickup& p = pks[i];
       p.on = true;
       p.x = o.x + gap / 2.0f;
-      p.y = frand(35, SAND_Y - 30);
+      p.y = frand(surf > 0 ? surf + 16 : 35, SAND_Y - 30);
       p.phase = frand(0, 6.28f);
       if (lives < maxLives() && random(100) < 12) {
         p.type = PK_HEART;
@@ -1504,7 +1649,7 @@ void spawnObstacle(int gap) {
 void obHitbox(const Obstacle& o, int& x, int& y, int& w, int& h) {
   switch (o.type) {
     case OB_ROCK:     x = (int)o.x + 3; y = SAND_Y - o.h + 3; w = o.w - 6; h = o.h; break;
-    case OB_ROCK_TOP: x = (int)o.x + 3; y = 0; w = o.w - 6; h = o.h - 3; break;
+    case OB_ROCK_TOP: x = (int)o.x + 3; y = (int)o.y; w = o.w - 6; h = o.h - 3; break;
     case OB_WEED:     x = (int)o.x - 6; y = SAND_Y - o.h + 4; w = 14; h = o.h; break;
     default:          x = (int)o.x - 10; y = (int)o.y - 5; w = 22; h = 10; break;
   }
@@ -1552,7 +1697,8 @@ void collect(Pickup& p) {
 
 void openSkins(State returnTo) {
   skinReturn = returnTo;
-  browse = P().skin;
+  browse = 0;                                     // start on the skin you're wearing
+  for (int k = 0; k < N_SKINS; k++) if (SKIN_ORDER[k] == P().skin) browse = k;
   state = ST_SKINS;
   lockInput(250);
 }
@@ -1668,7 +1814,7 @@ void updateName(float dt) {
       p.used = 1;
       strncpy(p.name, nameBuf, NAME_LEN);
       p.skin = 0;
-      p.unlocked = 1;
+      p.unlocked = 1;   // (no longer used, kept for old saves)
       p.seen = 1;
       p.level = 1;
       p.best = 0;
@@ -1790,7 +1936,17 @@ void updateTitle(float dt) {
 
 void drawTitle() {
   drawBackground();
-  shadowText("Axolotl Adventure", W / 2, 20, 4, C_GOLD);
+  // title with the version number in small print next to it
+  const char* title = "Axolotl Adventure";
+  const char* ver = "v" GAME_VERSION;
+  int tw1 = fb.textWidth(title, 4), tw2 = fb.textWidth(ver, 2);
+  int tx0 = W / 2 - (tw1 + 5 + tw2) / 2;
+  fb.setTextDatum(ML_DATUM);
+  fb.setTextColor(C_BLACK);
+  fb.drawString(title, tx0 + 2, 22, 4);
+  fb.setTextColor(C_GOLD);
+  fb.drawString(title, tx0, 20, 4);
+  textAt(ver, tx0 + tw1 + 5, 24, 2, C_WHITE, ML_DATUM);
   shadowText("by AliceFriend", W / 2, 42, 2, C_WHITE);
   int wig = wiggleT > 0 ? (int)(sinf(gameT * 30) * 4) : 0;
   drawCharacter(P().character, P().skin, profHat(P()), 110, 92 + (int)(sinf(gameT * 2) * 3) + wig, 2, gameT);
@@ -1820,7 +1976,8 @@ void drawTitle() {
 void updateSkins(float dt) {
   if (skinReturn == ST_TITLE) scrollX += 20 * dt;
   if (!tPressed) return;
-  bool un = skinUnlocked(browse);
+  int si = SKIN_ORDER[browse];
+  bool un = skinUnlocked(si);
   if (inRect(tx, ty, 8, 72, 50, 56)) {
     browse = (browse + N_SKINS - 1) % N_SKINS;
     playSound(SND(SND_CLICK));
@@ -1832,14 +1989,14 @@ void updateSkins(float dt) {
     else playSound(SND(SND_LOCKED));
   } else if (inRect(tx, ty, 110, 190, 100, 40)) {
     if (un) {
-      P().skin = browse;
+      P().skin = si;
       P().character = CH_AXOLOTL;    // skins are for the axolotl
       saveProfile(cur);
       playSound(SND(SND_SELECT));
     } else {
       playSound(SND(SND_CLICK));
     }
-    if (P().seen < P().unlocked) { P().seen = P().unlocked; saveProfile(cur); }   // badges cleared
+    if (P().seen < P().level) { P().seen = P().level; saveProfile(cur); }   // "NEW!" badges cleared
     state = skinReturn;
     lockInput(250);
   }
@@ -1848,9 +2005,11 @@ void updateSkins(float dt) {
 void drawSkins() {
   drawBackground();
   shadowText("Pick Your Axolotl", W / 2, 22, 4, C_GOLD);
-  bool un = skinUnlocked(browse);
+  int si = SKIN_ORDER[browse];
+  const Skin& sk = SKINS[si];
+  bool un = skinUnlocked(si);
   int wig = wiggleT > 0 ? (int)(sinf(gameT * 30) * 5) : 0;
-  drawAxolotl(160, 100 + wig, 3, gameT, SKINS[browse], !un);
+  drawAxolotl(160, 100 + wig, 3, gameT, sk, !un);
 
   if (!un) {  // padlock
     for (int r = 6; r <= 9; r++) fb.drawCircle(160, 94, r, C_GOLD);
@@ -1861,15 +2020,15 @@ void drawSkins() {
 
   drawArrowButton(8, 72, 50, 56, true, C_BLUE_BTN);
   drawArrowButton(262, 72, 50, 56, false, C_BLUE_BTN);
-  shadowText(SKINS[browse].name, W / 2, 150, 4, C_WHITE);
-  if (un && browse < LEVEL_SKINS && browse >= P().seen) drawNewBadge(212, 52);
+  shadowText(sk.name, W / 2, 150, 4, C_WHITE);
+  if (un && isNewSkin(si)) drawNewBadge(212, 52);
 
   char buf[32];
   if (!un) {
-    if (browse < LEVEL_SKINS) snprintf(buf, sizeof(buf), "Finish level %d to unlock!", browse);
-    else                      snprintf(buf, sizeof(buf), "Buy it in the Shop!");
+    if (sk.price == 0) snprintf(buf, sizeof(buf), "Finish level %d to unlock!", sk.lvl);
+    else               snprintf(buf, sizeof(buf), "Buy it in the Shop!");
     shadowText(buf, W / 2, 174, 2, C_GOLD);
-  } else if (browse == P().skin && P().character == CH_AXOLOTL) {
+  } else if (si == P().skin && P().character == CH_AXOLOTL) {
     shadowText("This is you!", W / 2, 174, 2, C_GOLD);
   } else {
     shadowText("Tap OK to choose", W / 2, 174, 2, C_WHITE);
@@ -2006,7 +2165,8 @@ void updatePlay(float dt) {
   }
   vy = constrain(vy, -MAX_VY, MAX_VY);
   py += vy * dt;
-  if (py < 18)          { py = 18;          if (vy < 0) vy = 0; }
+  int topLimit = surfaceY() > 0 ? surfaceY() + 10 : 18;   // can't swim up into the sky
+  if (py < topLimit)    { py = topLimit;    if (vy < 0) vy = 0; }
   if (py > SAND_Y - 12) { py = SAND_Y - 12; if (vy > 0) vy = 0; }
 
   // --- world scroll & spawning (speed stays the same on every level) ---
@@ -2151,7 +2311,7 @@ void drawClear() {
   if (newSkinName) {
     drawStar(88, 112, 10, C_GOLD);
     drawStar(232, 112, 10, C_GOLD);
-    drawAxolotl(160, 116, 2, overT * 2, SKINS[P().unlocked - 1]);   // show off the new skin
+    drawAxolotl(160, 116, 2, overT * 2, SKINS[newSkinIdx]);   // show off the new skin
     yInfo = 140;
     snprintf(buf, sizeof(buf), "New skin: %s!", newSkinName);
     shadowText(buf, W / 2, yInfo, 2, C_GOLD);
@@ -2221,7 +2381,7 @@ void shopAction(int btn) {
       break;
     }
     case 1: {  // shop skins
-      int si = LEVEL_SKINS + idx;
+      int si = FIRST_SHOP_SKIN + idx;
       if (!skinUnlocked(si)) {
         if (tryBuy(1, SKINS[si].price)) { p.skinsOwned |= (1UL << idx); p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); shopSay("So shiny!"); }
       } else {
@@ -2334,7 +2494,7 @@ void drawShop() {
       break;
     }
     case 1: {
-      int si = LEVEL_SKINS + idx;
+      int si = FIRST_SHOP_SKIN + idx;
       drawAxolotl(160, 116, 2, gameT, SKINS[si], false, profHat(p));
       name = SKINS[si].name;
       if (!skinUnlocked(si)) { price = SKINS[si].price; label1 = buyArmed ? "Tap again to buy!" : "Buy"; col1 = buyArmed ? C_RED_BTN : (p.coins >= SKINS[si].price ? C_GREEN_BTN : C_GREY_BTN); }
@@ -2487,6 +2647,7 @@ void setup() {
   speakerInit();
   xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 1, nullptr, 0);
 
+  buildSkinOrder();
   initBg();
   playSound(SND(SND_START), 2);
   ledFlash(1, 0, 1, 500);

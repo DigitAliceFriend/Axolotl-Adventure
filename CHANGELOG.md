@@ -1,36 +1,23 @@
 # Changelog
 
-## v1.3
-- Coins float in the water, and every level finished gives a coin bonus
-- New Shop (main menu and between levels): hats, special skins, shields and friends
-- 18 hats in lots of colours, including a Santa hat, sparkly, flashy and rainbow party hats, a wizard hat and a gold crown
-- Shields: tap the shield button for 5 seconds of safety
-- Axolotl friends: Seahorse, Shrimp, Turtle and Puffer. Hire one as a helper for a level, or unlock them to play as, each with their own bonus
-- New level skins: Tangerine (bright orange) and Slate (dark gray)
-- New shop skins with effects: Glitter, Frosty, Cotton Candy, Glow, Disco, Lava, Galaxy and Golden
-- Full-colour graphics (65,000 colours) for proper pastels and smooth effects
-- Saved players from v1.2 keep all their progress
-
-## v1.2
-- Six new skins: Ruby (red), Lemon (yellow), Cloud (light gray), Shadow (deep black), Forest (dark green) and Twilight (dark rainbow), unlocked at levels 11–16
-- Four underwater places that change each level: Sunny Lagoon, Coral Reef, Sunset Bay and Deep Sea
-- "NEW!" badges on skins you haven't looked at yet
-- The level-complete screen shows off your newly unlocked skin
-- Quitting from the pause menu now needs a second tap
-- The screen dims after a minute of no touches on the menus
-- Bubble trail behind the axolotl when swimming
-- Saved players from v1.1 keep their progress
-- The game is now a single `.ino` file (`GameTypes.h` is no longer needed)
-
 ## v1.1
-- Worms (5 points) and rare golden trophies (20 points)
-- Level system with growing goals: 50, 75, 100, 150, 200, then +100 per level
-- Skins unlock one per level finished; added Magenta, Cyan, Lavender and White
-- Player profiles saved to flash, and a top-10 leaderboard
-- Pause menu with skin and sound settings
-- Speed stays the same on every level
-- Bubbles are worth 2 points
+- The version number now shows in small print next to the title
+- Pastel skin collection, unlocked at levels 19–25: Blossom, Peach, Butter, Pistachio, Seafoam, Baby Blue and Lilac
+- New skin **Dusky**, unlocked at level 26, which slowly fades between blue, pink and purple
+- Sunset Bay is now **Sunset Cove**, with the sun shining down through the water, blurred and wobbling with the waves
+- Shallow levels: Sunny Lagoon and Coral Reef have low water with open sky above. You can't swim into the sky, hanging rocks become floating logs, and obstacles are scaled to fit.
+- New place: **Kelp Forest**, with tall kelp swaying in the background
+- The skin picker now lists skins in unlock order, with shop skins at the end
+- Saved players keep all their progress
 
 ## v1.0
-- First release: swim up and down, dodge rocks, seaweed and fish
-- Skins, sound effects, three speeds, hearts and saved best score
+The first full release, including:
+- Swim up and down to dodge rocks, seaweed and fish, with hearts and three speeds (Easy, Normal, Zoom!)
+- Points for worms (5), bubbles (2), rare golden trophies (20) and passing obstacles (1)
+- Levels with growing goals (50, 75, 100, 150, 200, then +100 each), and scenery that changes every level
+- 27 skins: 19 unlocked by levels, plus 8 special effect skins in the Shop
+- Coins, a Shop with 18 hats (including a Santa hat), shields and helper friends
+- Axolotl friends to play as: Seahorse, Shrimp, Turtle and Puffer, each with a bonus
+- Up to 6 saved players and a top-10 leaderboard
+- Pause menu with skin and sound settings, sound effects, RGB LED flashes and screen dimming
+- Full-colour graphics
