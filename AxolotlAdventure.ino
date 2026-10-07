@@ -1,7 +1,7 @@
 /*
  * ============================================================
  *              AXOLOTL ADVENTURE  by AliceFriend
- *                       version 1.2
+ *                       version 1.4
  * ============================================================
  *  For the original "Cheap Yellow Display" (ESP32-2432S028R)
  *  ILI9341 320x240 screen + XPT2046 touch + speaker + RGB LED
@@ -48,6 +48,8 @@ enum State {
   ST_STICKERS,   // achievements
   ST_SETTINGS,   // speed, sound, music, brightness
   ST_REVIVE,     // "keep swimming for 25 coins?"
+  ST_BONUS,      // first-person bonus round
+  ST_BONUS_END,  // bonus round results
   ST_READY,      // 3-2-1 countdown
   ST_PLAY,
   ST_PAUSE,      // pause menu
@@ -58,8 +60,8 @@ enum State {
 enum ObType : uint8_t { OB_ROCK, OB_ROCK_TOP, OB_WEED, OB_FISH };
 struct Obstacle { bool on; ObType type; float x, y; int w, h; float spd, phase; uint16_t col; bool passed; };
 
-enum PkType : uint8_t { PK_BUBBLE, PK_HEART, PK_WORM, PK_TROPHY, PK_COIN };
-struct Pickup { bool on; PkType type; float x, y, phase; };
+enum PkType : uint8_t { PK_BUBBLE, PK_HEART, PK_WORM, PK_TROPHY, PK_COIN, PK_COINBAG };
+struct Pickup { bool on; PkType type; float x, y, phase; float vx, vy, tt; };   // vx/vy/tt: thrown items fly for tt seconds
 
 struct Spark     { bool on; float x, y, vx, vy, life; uint16_t c; };
 struct FloatText { bool on; float x, y, life; char s[16]; uint16_t c; };
@@ -77,7 +79,8 @@ enum Fx : uint8_t {
   FX_PULSE,     // glows brighter and darker
   FX_STARS,     // little stars twinkle across it
   FX_SHIFT,     // slowly blends between two colours
-  FX_DUSK       // fades blue -> pink -> purple (the "Dusky" skin)
+  FX_DUSK,      // fades blue -> pink -> purple (the "Dusky" skin)
+  FX_DREAM      // very soft pastel rainbow with sparkles ("Pastel Dream")
 };
 
 struct Skin {
@@ -123,10 +126,17 @@ struct Profile {
   uint16_t trophiesFound;
   uint16_t perfectLevels;    // levels finished without a bump
   uint32_t stickers;         // one bit per sticker earned
+  // ---- added in v1.4 ----
+  uint16_t bonusBest;        // most coins grabbed in one bonus round
 };
 
+// Bonus round objects: x, y from about -1 to 1 across the screen, z = distance away
+enum BType : uint8_t { BO_COIN, BO_BUBBLE, BO_WORM, BO_BAG, BO_ROCK, BO_JELLY, BO_FISH };
+struct BObj { bool on, checked; uint8_t type; float x, y, z, phase; };
+struct BSpeck { float x, y, z; };
+
 // Stickers (achievements): reach the target to earn the sticker and its coins
-enum StickerKind : uint8_t { SK_LEVELS, SK_WORMS, SK_BUBBLES, SK_COINS, SK_TROPHIES, SK_PERFECT, SK_HATS, SK_FRIENDS, SK_SCORE };
+enum StickerKind : uint8_t { SK_LEVELS, SK_WORMS, SK_BUBBLES, SK_COINS, SK_TROPHIES, SK_PERFECT, SK_HATS, SK_FRIENDS, SK_SCORE, SK_BONUS };
 struct Sticker { const char* name; const char* desc; uint8_t kind; uint32_t target; uint16_t reward; uint16_t color; };
 
 // ---------------- Full-colour drawing ----------------
@@ -164,7 +174,7 @@ struct ScoreEntry {
   uint32_t score;
 };
 
-#define GAME_VERSION "1.2"   // shown next to the title (see CHANGELOG.md)
+#define GAME_VERSION "1.4"   // shown next to the title (see CHANGELOG.md)
 
 // ---------------- Hardware pins (original CYD) ----------------
 #define XPT2046_IRQ   36
@@ -220,6 +230,17 @@ static const int MAX_SHIELDS  = 5;
 int levelCoinBonus(int lvl) { return 10 + 5 * lvl; }   // coins for finishing a level
 static const int PERFECT_BONUS = 10;   // extra coins for a level with no bumps
 static const int REVIVE_PRICE  = 25;   // coins to keep swimming when out of hearts (once per level)
+static const int CLAM_CHANCE   = 35;   // % of levels the helpful clam visits (about 1 in 3)
+static const int COINBAG_COINS = 20;   // coins in the clam's bag
+
+// Bonus round (first-person): after every 5th level
+static const int   BONUS_EVERY = 5;
+static const float BONUS_TIME  = 30;     // seconds
+static const float B_SPEED     = 5.0f;   // how fast things rush toward you
+static const float B_FOCAL     = 140;    // perspective strength
+static const float B_CX = 160, B_CY = 112;   // the far-away point everything comes from
+static const float B_ZFAR      = 10;     // how far away things appear
+static const float B_FLOOR     = 0.9f;   // height of the sea floor
 
 // Characters (0 = axolotl, then the friends)
 #define CH_AXOLOTL  0
@@ -334,8 +355,8 @@ const Skin SKINS[] = {
   {"Shadow",   RGB(25, 25, 32),    RGB(55, 55, 68),    RGB(95, 65, 120),   RGB(235, 195, 40), FX_NONE,    0, 0, 14},  // level 14 (deep black)
   {"Forest",   RGB(30, 100, 50),   RGB(70, 145, 85),   RGB(15, 60, 30),    RGB(235, 195, 40), FX_NONE,    0, 0, 15},  // level 15 (dark green)
   {"Twilight", 0, 0, 0,                                                     C_WHITE,           FX_DARKBOW, 0, 0, 16},  // level 16 (dark rainbow)
-  {"Tangerine",RGB(255, 120, 0),   RGB(255, 195, 120), RGB(200, 70, 0),    C_BLACK,           FX_NONE,    0, 0, 17},  // level 17 (bright orange)
-  {"Slate",    RGB(85, 88, 95),    RGB(125, 128, 135), RGB(55, 58, 65),    RGB(235, 195, 40), FX_NONE,    0, 0, 18},  // level 18 (dark gray)
+  {"Tangerine",RGB(255, 120, 0),   RGB(255, 195, 120), RGB(200, 70, 0),    C_BLACK,           FX_NONE,    0, 65, 17},  // level 17 (bright orange)
+  {"Slate",    RGB(85, 88, 95),    RGB(125, 128, 135), RGB(55, 58, 65),    RGB(235, 195, 40), FX_NONE,    0, 70, 18},  // level 18 (dark gray)
   // ---- shop skins ----
   {"Glitter",  RGB(255, 170, 215), RGB(255, 225, 240), RGB(240, 90, 170),  C_BLACK, FX_SPARKLE, C_WHITE, 60, 0},
   {"Frosty",   RGB(190, 235, 255), RGB(235, 250, 255), RGB(120, 190, 240), C_BLACK, FX_SPARKLE, C_WHITE, 60, 0},
@@ -354,15 +375,20 @@ const Skin SKINS[] = {
   {"Baby Blue", RGB(180, 210, 255), RGB(225, 238, 255), RGB(120, 160, 230), C_BLACK, FX_NONE, 0, 100, 24},  // pastel blue
   {"Lilac",     RGB(215, 190, 245), RGB(238, 225, 252), RGB(165, 130, 215), C_BLACK, FX_NONE, 0, 110, 25},  // pastel purple
   {"Dusky",     RGB(95, 125, 210),  RGB(220, 210, 240), RGB(130, 90, 190),  C_BLACK, FX_DUSK, 0, 150, 26},  // fades blue, pink, purple
+  // ---- added in v1.3 (shop only) ----
+  {"Charcoal",  RGB(55, 57, 63),    RGB(90, 93, 100),   RGB(35, 37, 42),    RGB(235, 195, 40), FX_NONE, 0, 70, 0},  // deep dark gray
+  {"Pastel Dream", 0, 0, 0,                                                 C_BLACK, FX_DREAM, C_WHITE, 200, 0}, // soft pastel rainbow + sparkles
 };
 const int N_SKINS = sizeof(SKINS) / sizeof(SKINS[0]);
-const int FIRST_SHOP_SKIN = 19;                 // skins from here on can have a shop price
-// (each one's "bought" flag is bit number (skin - FIRST_SHOP_SKIN) in skinsOwned)
+const int FIRST_SHOP_SKIN = 19;
+// Which bit of skinsOwned says a skin was bought. Skins 19 and up use bits 0, 1, 2...
+// Tangerine (17) and Slate (18) went on sale later, so they use the top bits 30 and 31.
+int skinShopBit(int i) { return i >= FIRST_SHOP_SKIN ? i - FIRST_SHOP_SKIN : 13 + i; }
 
 bool isLevelSkin(int i) { return SKINS[i].lvl > 0 || SKINS[i].price == 0; }   // unlocks by finishing levels
 bool isShopOnly(int i)  { return SKINS[i].lvl == 0 && SKINS[i].price > 0; }
 
-// The Shop's Skins tab: shop-only skins first, then level skins you can buy early
+// The Shop's Skins tab (cheapest first)
 int SHOP_SKIN_LIST[N_SKINS];
 int N_SHOP_SKINS = 0;
 const int MAX_SKIN_LEVEL = 26;                  // the last level that unlocks a skin
@@ -375,9 +401,11 @@ void buildSkinOrder() {
       if (isLevelSkin(i) && SKINS[i].lvl == l) SKIN_ORDER[n++] = i;
   for (int i = 0; i < N_SKINS; i++)
     if (isShopOnly(i)) SKIN_ORDER[n++] = i;
+  // the shop lists every skin with a price, cheapest first
   N_SHOP_SKINS = 0;
-  for (int i = 0; i < N_SKINS; i++) if (isShopOnly(i)) SHOP_SKIN_LIST[N_SHOP_SKINS++] = i;
-  for (int i = 0; i < N_SKINS; i++) if (SKINS[i].price > 0 && !isShopOnly(i)) SHOP_SKIN_LIST[N_SHOP_SKINS++] = i;
+  for (int pr = 1; pr <= 1000; pr++)
+    for (int i = 0; i < N_SKINS; i++)
+      if (SKINS[i].price == pr) SHOP_SKIN_LIST[N_SHOP_SKINS++] = i;
 }
 
 // ---------------- Hats (bought in the shop) ----------------
@@ -431,6 +459,7 @@ const Sticker STICKERS[] = {
   {"Best Friends",   "Unlock a friend to play as",   SK_FRIENDS,  1,      20,    RGB(255, 170, 60)},
   {"Super Swimmer",  "Score 500 in one game",        SK_SCORE,    500,    30,    RGB(190, 110, 235)},
   {"Legend",         "Finish level 26",              SK_LEVELS,   26,     100,   RGB(255, 80, 200)},
+  {"Bonus Champ",    "Grab 40 coins in a bonus round", SK_BONUS,  40,     30,    RGB(255, 150, 40)},
 };
 const int N_STICKERS = sizeof(STICKERS) / sizeof(STICKERS[0]);
 
@@ -468,6 +497,7 @@ const Note SND_DELETE[]    = {{400, 60}, {300, 90}};
 const Note SND_COIN[]      = {{1976, 40}, {2637, 80}};
 const Note SND_BUY[]       = {{1047, 60}, {1319, 60}, {1568, 60}, {2093, 140}};
 const Note SND_SHIELD[]    = {{600, 60}, {900, 60}, {1200, 140}};
+const Note SND_CLAM[]      = {{700, 40}, {1000, 40}, {1400, 70}};
 const Note SND_SQUEAK[]    = {{1500, 40}, {2000, 40}, {1700, 60}};
 #define SND(x) x, (uint8_t)(sizeof(x) / sizeof(x[0]))
 
@@ -686,6 +716,24 @@ int   stickerQueue[4], stickerQLen = 0;     // stickers waiting to be shown
 float stickerT = 0;                         // how long the current sticker banner shows
 int   stickerSel = 0;                       // sticker selected on the stickers screen
 State settingsReturn = ST_TITLE;
+
+// The helpful clam: visits some levels, throws you a bag of coins or a heart
+struct Clam { bool thisLevel, used, active, thrown; float x, t, sayT, appearAt; int phrase; };
+Clam  clam;
+float levelTime = 0;
+const char* CLAM_PHRASES[] = {"You can do it!", "Great swimming!", "Here, catch!", "Keep going!",
+                              "You're awesome!", "For you, friend!", "Go, go, go!", "You're a star!"};
+const int N_CLAM_PHRASES = sizeof(CLAM_PHRASES) / sizeof(CLAM_PHRASES[0]);
+
+// Bonus round
+const int MAX_BOBJ = 40, N_SPECKS = 24, N_RINGS = 6;
+BObj   bobj[MAX_BOBJ];
+BSpeck bspeck[N_SPECKS];
+float  bRingZ[N_RINGS];
+bool   bonusMode = false, pendingBonus = false;
+float  bonusT = 0, bonusSpawnT = 0, bonusStun = 0;
+float  bpx = 0, bpy = 0;          // where the player is in the bonus round
+int    bonusCoins = 0, bonusPoints = 0;
 bool  dimmed = false;
 
 // ============================================================
@@ -704,7 +752,7 @@ void saveProfile(int i) {
 void saveScores() { prefs.putBytes("lb", scores, sizeof(scores)); }
 
 bool skinOwnedBy(const Profile& p, int i) {
-  bool bought = SKINS[i].price > 0 && i >= FIRST_SHOP_SKIN && ((p.skinsOwned >> (i - FIRST_SHOP_SKIN)) & 1);
+  bool bought = SKINS[i].price > 0 && ((p.skinsOwned >> skinShopBit(i)) & 1);
   bool earned = isLevelSkin(i) && p.level - 1 >= SKINS[i].lvl;   // levels finished
   return bought || earned;
 }
@@ -774,6 +822,7 @@ uint32_t stickerProgress(int i) {
     case SK_PERFECT:  return p.perfectLevels;
     case SK_HATS:     return countBits(p.hatsOwned);
     case SK_FRIENDS:  return countBits(p.friendsOwned);
+    case SK_BONUS:    return p.bonusBest;
     default: {        // SK_SCORE: best score, including the game being played now
       uint32_t live = runActive ? (uint32_t)runScore : 0;
       return p.best > live ? p.best : live;
@@ -920,7 +969,7 @@ void drawNewBadge(int x, int y) {
 
 // "seen" = (levels finished + 1) when the player last looked at their skins
 int  levelsDone() { return P().level - 1; }
-bool skinBought(int i) { return SKINS[i].price > 0 && i >= FIRST_SHOP_SKIN && ((P().skinsOwned >> (i - FIRST_SHOP_SKIN)) & 1); }
+bool skinBought(int i) { return SKINS[i].price > 0 && ((P().skinsOwned >> skinShopBit(i)) & 1); }
 bool isNewSkin(int i) {
   return isLevelSkin(i) && !skinBought(i) && SKINS[i].lvl >= P().seen && SKINS[i].lvl <= levelsDone();
 }
@@ -1096,14 +1145,20 @@ void drawHat(int idx, int x, int y, int s, float t) {
 }
 
 // The star of the show! Facing right. s = scale (1 in game, 2-3 in menus)
-void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = false, int hat = -1) {
-  uint16_t body = sk.body, belly = sk.belly, gill = sk.gill, eye = sk.eye;
+// Works out a skin's colours at time t (for skins with effects)
+void skinColours(const Skin& sk, float t, uint16_t& body, uint16_t& belly, uint16_t& gill, uint16_t& eye) {
+  body = sk.body; belly = sk.belly; gill = sk.gill; eye = sk.eye;
   if (sk.fx == FX_FLASH || sk.fx == FX_PULSE || sk.fx == FX_SHIFT || sk.fx == FX_DUSK) {
     body  = fxColor(sk.fx, sk.body, sk.alt, t);
     belly = lerp565(body, C_WHITE, 0.5f);
     if (sk.fx == FX_DUSK) gill = darker565(lerp565(body, C_WHITE, 0.2f)) | 0x0841;
   }
-  if (sk.fx == FX_RAINBOW) {
+  if (sk.fx == FX_DREAM) {   // extra-soft rainbow
+    float h = fmodf(t * 0.25f, 1.0f);
+    body  = lerp565(pastelHue(h), C_WHITE, 0.35f);
+    belly = lerp565(pastelHue(fmodf(h + 0.15f, 1.0f)), C_WHITE, 0.6f);
+    gill  = lerp565(pastelHue(fmodf(h + 0.5f, 1.0f)), C_WHITE, 0.15f);
+  } else if (sk.fx == FX_RAINBOW) {
     float h = fmodf(t * 0.3f, 1.0f);
     body  = pastelHue(h);
     belly = pastelHue(fmodf(h + 0.12f, 1.0f));
@@ -1114,6 +1169,11 @@ void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = f
     belly = darkHue(fmodf(h + 0.12f, 1.0f), 1.4f);
     gill  = darkHue(fmodf(h + 0.5f, 1.0f), 1.5f);
   }
+}
+
+void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = false, int hat = -1) {
+  uint16_t body, belly, gill, eye;
+  skinColours(sk, t, body, belly, gill, eye);
   if (locked) { body = RGB(60, 70, 95); belly = RGB(80, 90, 115); gill = RGB(45, 55, 80); eye = RGB(30, 35, 50); }
 
   float wig = sinf(t * 9.0f);
@@ -1170,7 +1230,7 @@ void drawAxolotl(int cx, int cy, int s, float t, const Skin& sk, bool locked = f
   }
 
   if (!locked) {
-    if (sk.fx == FX_SPARKLE)    drawTwinkles(cx, cy, s, t, sk.alt, 7, 6.0f);
+    if (sk.fx == FX_SPARKLE || sk.fx == FX_DREAM) drawTwinkles(cx, cy, s, t, sk.alt, 7, 6.0f);
     else if (sk.fx == FX_STARS) drawTwinkles(cx, cy, s, t, sk.alt, 8, 3.5f);
     drawHat(hat, cx + 11 * s, cy - 7 * s, s, t);
   }
@@ -1278,9 +1338,125 @@ void drawCharacter(int ch, int skin, int hat, int cx, int cy, int s, float t) {
   }
 }
 
+// ---------- seen from behind (for the first-person bonus round) ----------
+void drawGillFan(int cx, int cy, int s, float t, uint16_t gill, int side) {
+  const int8_t gb[3][2] = {{7, -9}, {8, -6}, {8, -3}};
+  const int8_t gt[3][2] = {{14, -16}, {17, -9}, {15, -2}};
+  for (int k = 0; k < 3; k++) {
+    int bx = cx + side * gb[k][0] * s, by = cy + gb[k][1] * s;
+    int ex = cx + side * gt[k][0] * s + (int)(sinf(t * 6 + k + side) * s), ey = cy + gt[k][1] * s;
+    for (int d = 0; d <= s; d++) fb.drawLine(bx, by + d, ex, ey + d, gill);
+    fb.fillCircle(ex, ey, 2 * s, gill);
+    fb.fillCircle((bx + ex) / 2, (by + ey) / 2, s, gill);
+  }
+}
+
+void drawAxolotlBack(int cx, int cy, int s, float t, const Skin& sk, int hat) {
+  uint16_t body, belly, gill, eye;
+  skinColours(sk, t, body, belly, gill, eye);
+  float wig = sinf(t * 9.0f);
+  int lp = (int)(sinf(t * 8.0f) * 2 * s);
+  int tipX = cx + (int)(wig * 5 * s), tipY = cy + 19 * s;        // tail, swishing side to side
+  fb.fillTriangle(cx - 4 * s, cy + 6 * s, cx + 4 * s, cy + 6 * s, tipX, tipY, body);
+  fb.fillTriangle(cx - s, cy + 6 * s, cx + s, cy + 6 * s, tipX, tipY - 2 * s, belly);
+  fb.fillEllipse(cx - 10 * s, cy - s + lp, 4 * s, 2 * s, body);   // paddling legs
+  fb.fillEllipse(cx + 10 * s, cy - s - lp, 4 * s, 2 * s, body);
+  fb.fillEllipse(cx - 8 * s, cy + 7 * s - lp, 3 * s, 2 * s, body);
+  fb.fillEllipse(cx + 8 * s, cy + 7 * s + lp, 3 * s, 2 * s, body);
+  fb.fillEllipse(cx, cy + 3 * s, 8 * s, 7 * s, body);             // body
+  fb.fillEllipse(cx, cy + 5 * s, s, 5 * s, belly);                // back ridge
+  drawGillFan(cx, cy, s, t, gill, -1);                            // gills fan out both sides
+  drawGillFan(cx, cy, s, t, gill, 1);
+  fb.fillEllipse(cx, cy - 6 * s, 10 * s, 7 * s, body);            // head
+  fb.fillCircle(cx - 9 * s, cy - 7 * s, s, eye);                  // eyes peeking out the sides
+  fb.fillCircle(cx + 9 * s, cy - 7 * s, s, eye);
+  if (sk.fx == FX_SPARKLE || sk.fx == FX_DREAM) drawTwinkles(cx + 2 * s, cy, s, t, sk.alt, 6, 6.0f);
+  else if (sk.fx == FX_STARS)                   drawTwinkles(cx + 2 * s, cy, s, t, sk.alt, 8, 3.5f);
+  drawHat(hat, cx, cy - 12 * s, s, t);
+}
+
+void drawFriendBack(int id, int cx, int cy, int s, float t, int& hx, int& hy) {
+  const Friend& f = FRIENDS[id];
+  uint16_t c1 = f.c1, c2 = f.c2, c3 = f.c3;
+  int wig = (int)(sinf(t * 12) * s);
+  switch (id) {
+    case 0:  // seahorse
+      fb.fillCircle(cx, cy + 8 * s, 2 * s, c1);                   // curly tail
+      fb.fillCircle(cx + s, cy + 10 * s, (3 * s) / 2, c1);
+      fb.fillCircle(cx, cy + 12 * s, s, c1);
+      fb.fillTriangle(cx - 3 * s, cy - s, cx - 3 * s, cy + 3 * s, cx - 7 * s + wig, cy + s, c3);   // side fins
+      fb.fillTriangle(cx + 3 * s, cy - s, cx + 3 * s, cy + 3 * s, cx + 7 * s + wig, cy + s, c3);
+      fb.fillEllipse(cx, cy + s, 4 * s, 6 * s, c1);
+      for (int k = 0; k < 3; k++) fb.drawFastHLine(cx - 2 * s, cy - s + k * 2 * s, 4 * s, c3);
+      fb.fillCircle(cx, cy - 6 * s, 4 * s, c1);                   // head
+      fb.fillCircle(cx, cy - 10 * s, s, c3);                      // crest
+      fb.fillCircle(cx - 4 * s, cy - 7 * s, s, C_BLACK);
+      fb.fillCircle(cx + 4 * s, cy - 7 * s, s, C_BLACK);
+      hx = cx; hy = cy - 10 * s;
+      break;
+    case 1:  // shrimp
+      fb.fillTriangle(cx - 4 * s + wig, cy + 11 * s, cx + 4 * s + wig, cy + 11 * s, cx, cy + 6 * s, c3);   // tail fan
+      for (int k = 0; k < 3; k++) {                               // legs
+        int ly = cy - s + k * 3 * s, lw = (int)(sinf(t * 12 + k) * s);
+        fb.drawLine(cx - 3 * s, ly, cx - 6 * s, ly + 2 * s + lw, c3);
+        fb.drawLine(cx + 3 * s, ly, cx + 6 * s, ly + 2 * s - lw, c3);
+      }
+      fb.fillCircle(cx, cy + 5 * s, 2 * s, c1);
+      fb.fillCircle(cx, cy + 2 * s, 3 * s, c1);
+      fb.fillCircle(cx, cy - s, 3 * s, c1);
+      fb.fillCircle(cx, cy - 4 * s, 3 * s, c1);                   // head
+      fb.drawFastHLine(cx - 2 * s, cy + s, 4 * s, c3);
+      fb.drawFastHLine(cx - 2 * s, cy + 4 * s, 4 * s, c3);
+      fb.drawLine(cx - 2 * s, cy - 6 * s, cx - 7 * s, cy - 14 * s + wig, c3);   // feelers
+      fb.drawLine(cx + 2 * s, cy - 6 * s, cx + 7 * s, cy - 14 * s - wig, c3);
+      fb.fillCircle(cx - 3 * s, cy - 6 * s, s, C_BLACK);
+      fb.fillCircle(cx + 3 * s, cy - 6 * s, s, C_BLACK);
+      hx = cx; hy = cy - 7 * s;
+      break;
+    case 2: {  // turtle
+      int fl = (int)(sinf(t * 7) * s);
+      fb.fillEllipse(cx - 8 * s, cy - 4 * s + fl, 3 * s, 2 * s, c2);   // flippers
+      fb.fillEllipse(cx + 8 * s, cy - 4 * s - fl, 3 * s, 2 * s, c2);
+      fb.fillEllipse(cx - 6 * s, cy + 6 * s - fl, 2 * s, 2 * s, c2);
+      fb.fillEllipse(cx + 6 * s, cy + 6 * s + fl, 2 * s, 2 * s, c2);
+      fb.fillTriangle(cx - s, cy + 8 * s, cx + s, cy + 8 * s, cx, cy + 11 * s, c2);   // tail
+      fb.fillCircle(cx, cy - 9 * s, 3 * s, c2);                   // head peeking over
+      fb.fillEllipse(cx, cy, 8 * s, 9 * s, c1);                   // shell
+      fb.fillCircle(cx, cy, 3 * s, c3);
+      fb.fillCircle(cx, cy - 5 * s, s + s / 2, c3);
+      fb.fillCircle(cx, cy + 5 * s, s + s / 2, c3);
+      fb.fillCircle(cx - 5 * s, cy, s + s / 2, c3);
+      fb.fillCircle(cx + 5 * s, cy, s + s / 2, c3);
+      hx = cx; hy = cy - 11 * s;
+      break;
+    }
+    default:  // pufferfish
+      for (int k = 0; k < 12; k++) {
+        float a = k * 0.5236f;
+        fb.drawLine(cx + (int)(cosf(a) * 6 * s), cy + (int)(sinf(a) * 6 * s),
+                    cx + (int)(cosf(a) * 8 * s), cy + (int)(sinf(a) * 8 * s), c3);
+      }
+      fb.fillTriangle(cx - 3 * s + wig, cy + 10 * s, cx + 3 * s + wig, cy + 10 * s, cx, cy + 5 * s, c3);   // tail
+      fb.fillCircle(cx, cy, 6 * s, c1);
+      fb.fillTriangle(cx - 6 * s, cy, cx - 9 * s, cy - 2 * s + wig, cx - 9 * s, cy + 2 * s + wig, c3);   // side fins
+      fb.fillTriangle(cx + 6 * s, cy, cx + 9 * s, cy - 2 * s - wig, cx + 9 * s, cy + 2 * s - wig, c3);
+      fb.fillCircle(cx - 5 * s, cy - 2 * s, s, C_BLACK);
+      fb.fillCircle(cx + 5 * s, cy - 2 * s, s, C_BLACK);
+      hx = cx; hy = cy - 6 * s;
+      break;
+  }
+}
+
+void drawCharacterBack(int ch, int skin, int hat, int cx, int cy, int s, float t) {
+  if (ch == CH_AXOLOTL || ch > N_FRIENDS) { drawAxolotlBack(cx, cy, s, t, SKINS[skin], hat); return; }
+  int hx, hy;
+  drawFriendBack(ch - 1, cx, cy, s + 1, t, hx, hy);
+  if (hat >= 0) drawHat(hat, hx, hy, s, t);
+}
+
 bool inGameState() {
   return state == ST_READY || state == ST_PLAY || state == ST_PAUSE || state == ST_CLEAR || state == ST_OVER ||
-         state == ST_REVIVE;
+         state == ST_REVIVE || state == ST_BONUS || state == ST_BONUS_END;
 }
 
 int currentTheme() { return inGameState() ? (curLevel - 1) % N_THEMES : 0; }
@@ -1484,6 +1660,14 @@ void drawPickups() {
       case PK_TROPHY:
         drawTrophy(x, y);
         break;
+      case PK_COINBAG:          // the clam's bag of coins
+        fb.fillCircle(x, y + 2, 9, RGB(170, 120, 60));
+        fb.fillTriangle(x - 5, y - 6, x + 5, y - 6, x, y - 1, RGB(140, 95, 45));
+        fb.fillTriangle(x - 6, y - 10, x - 1, y - 6, x - 4, y - 5, RGB(170, 120, 60));
+        fb.fillTriangle(x + 6, y - 10, x + 1, y - 6, x + 4, y - 5, RGB(170, 120, 60));
+        fb.fillRect(x - 4, y - 6, 9, 2, C_GOLD);
+        drawCoinIcon(x, y + 3, 4);
+        break;
       case PK_COIN: {           // spinning coin
         int w = (int)(fabsf(cosf(gameT * 4 + p.phase)) * 6) + 1;
         fb.fillEllipse(x, y, w, 6, C_TROPHY_DARK);
@@ -1588,11 +1772,65 @@ void drawHUD(bool showPause) {
   }
 }
 
+// ---------- the helpful clam ----------
+float clamOpenness() {
+  if (!clam.thrown) return (sinf(gameT * 2.0f) > 0.85f) ? 0.2f : 0.0f;   // peeks now and then
+  if (clam.t < 0.25f) return clam.t * 4;
+  if (clam.t < 2.2f)  return 1.0f;
+  float o = 1.0f - (clam.t - 2.2f) * 3;
+  return o > 0 ? o : 0;
+}
+
+void drawClam() {
+  if (!clam.active) return;
+  int x = (int)clam.x, hy = SAND_Y - 6;
+  uint16_t shell = RGB(205, 125, 195), dark = RGB(150, 80, 150), inside = RGB(255, 200, 215);
+  int lift = (int)(clamOpenness() * 11);
+  for (int r = 0; r <= 8; r++) {                         // bottom shell
+    int w = (int)(18 * sqrtf(1.0f - (r / 8.5f) * (r / 8.5f)));
+    fb.drawFastHLine(x - w, hy + r, 2 * w + 1, shell);
+  }
+  if (lift > 1) {                                        // open: pink inside and a pearl
+    fb.fillEllipse(x, hy - lift / 2, 16, lift / 2 + 1, inside);
+    fb.fillCircle(x + 4, hy - 2, 3, C_WHITE);
+    fb.drawLine(x - 6, hy + 2, x - 2, hy + 4, dark);     // smile
+    fb.drawLine(x - 2, hy + 4, x + 2, hy + 2, dark);
+  }
+  int ty0 = hy - lift;
+  for (int r = 0; r <= 10; r++) {                        // top shell
+    int w = (int)(18 * sqrtf(1.0f - (r / 10.5f) * (r / 10.5f)));
+    fb.drawFastHLine(x - w, ty0 - r, 2 * w + 1, shell);
+  }
+  for (int k = -2; k <= 2; k++) fb.drawLine(x, ty0, x + k * 7, ty0 - 9 + (k < 0 ? -k : k), dark);
+  bool blink = fmodf(gameT, 2.7f) < 0.12f;              // friendly eyes, looking at you
+  for (int e = -1; e <= 1; e += 2) {
+    fb.fillCircle(x + e * 6, ty0 - 6, 3, C_WHITE);
+    if (blink) fb.drawFastHLine(x + e * 6 - 3, ty0 - 6, 7, C_BLACK);
+    else       fb.fillCircle(x + e * 6 - 1, ty0 - 6, 1, C_BLACK);
+  }
+}
+
+void drawClamSpeech() {
+  if (!clam.active || clam.sayT <= 0) return;
+  const char* msg = CLAM_PHRASES[clam.phrase];
+  int w = fb.textWidth(msg, 2) + 14;
+  int cx = (int)clam.x;
+  int bx = constrain(cx - w / 2, 4, W - w - 4), by = SAND_Y - 62;
+  fb.fillTriangle(cx - 5, by + 21, cx + 5, by + 21, cx, by + 30, C_WHITE);
+  fb.fillRoundRect(bx, by, w, 22, 9, C_WHITE);
+  fb.drawRoundRect(bx, by, w, 22, 9, RGB(150, 80, 150));
+  fb.setTextDatum(MC_DATUM);
+  fb.setTextColor(RGB(90, 40, 100));
+  fb.drawString(msg, bx + w / 2, by + 11, 2);
+}
+
 void drawGame() {
   drawBackground();
+  drawClam();
   drawPickups();
   drawObstacles();
   drawPlayer();
+  drawClamSpeech();
 }
 
 // ============================================================
@@ -1662,6 +1900,7 @@ int maxLives() { return MODES[mode].lives + (playerChar() == CH_TURTLE ? 1 : 0);
 float shieldTime() { return playerChar() == CH_PUFFER ? 8.0f : 5.0f; }
 
 void startLevel() {
+  bonusMode = false;
   clearWorld();
   vy = 0; invuln = 0;
   levelScore = 0;
@@ -1671,6 +1910,11 @@ void startLevel() {
   shieldT = 0;
   hitThisLevel = false;
   revivedThisLevel = false;
+  levelTime = 0;
+  clam.active = false;
+  clam.used = false;
+  clam.thisLevel = random(100) < CLAM_CHANCE;   // only some levels get a visit
+  clam.appearAt = frand(8, 25);                 // seconds into the level
   levelHelper = P().helper ? P().helper - 1 : -1;   // stays until the level is finished
   goReady();
   py = (surfaceY() + SAND_Y) / 2;   // start in the middle of the water
@@ -1705,6 +1949,7 @@ void levelComplete() {
       if (isLevelSkin(i) && SKINS[i].lvl == curLevel && !skinBought(i)) { newSkinIdx = i; newSkinName = SKINS[i].name; }
   }
   coinBonus = levelCoinBonus(curLevel);
+  pendingBonus = (curLevel % BONUS_EVERY == 0);   // a bonus round comes next
   perfectLevel = !hitThisLevel;
   if (perfectLevel) { coinBonus += PERFECT_BONUS; p.perfectLevels++; }
   p.coins += coinBonus;
@@ -1776,7 +2021,7 @@ void hurt() {
   }
 }
 
-bool spawnPickup(PkType type, float x, float y) {
+int spawnPickup(PkType type, float x, float y) {   // returns the slot, or -1 if full
   for (int i = 0; i < MAX_PK; i++) {
     if (pks[i].on) continue;
     pks[i].on = true;
@@ -1784,9 +2029,42 @@ bool spawnPickup(PkType type, float x, float y) {
     pks[i].x = x;
     pks[i].y = y;
     pks[i].phase = frand(0, 6.28f);
-    return true;
+    pks[i].vx = pks[i].vy = pks[i].tt = 0;
+    return i;
   }
-  return false;
+  return -1;
+}
+
+void updateClam(float dt, float dx) {
+  if (clam.thisLevel && !clam.used && levelTime >= clam.appearAt) {
+    clam.used = true;
+    clam.active = true;
+    clam.thrown = false;
+    clam.x = W + 30;
+    clam.t = 0;
+    clam.sayT = 0;
+    clam.phrase = random(N_CLAM_PHRASES);
+  }
+  if (!clam.active) return;
+  clam.x -= dx;
+  clam.t += dt;
+  if (clam.sayT > 0) clam.sayT -= dt;
+  if (!clam.thrown && clam.x < W - 90) {
+    clam.thrown = true;
+    clam.t = 0;
+    clam.sayT = 2.6f;
+    // a heart if you need one (half the time), otherwise a bag of 20 coins
+    PkType type = (lives < maxLives() && random(100) < 50) ? PK_HEART : PK_COINBAG;
+    float sx = clam.x, sy = SAND_Y - 18, T = 1.1f;
+    int k = spawnPickup(type, sx, sy);
+    if (k >= 0) {                                         // toss it toward the player
+      pks[k].vx = (PLAYER_X + 40 - sx) / T + speed;
+      pks[k].vy = (py - sy) / T;
+      pks[k].tt = T;
+    }
+    playSound(SND(SND_CLAM), 2);
+  }
+  if (clam.x < -40) clam.active = false;
 }
 
 void spawnObstacle(int gap) {
@@ -1830,6 +2108,7 @@ void spawnObstacle(int gap) {
       p.x = o.x + gap / 2.0f;
       p.y = frand(surf > 0 ? surf + 16 : 35, SAND_Y - 30);
       p.phase = frand(0, 6.28f);
+      p.vx = p.vy = p.tt = 0;
       if (lives < maxLives() && random(100) < 12) {
         p.type = PK_HEART;
       } else if (random(100) < 50) {
@@ -1880,6 +2159,13 @@ void collectOne(Pickup& p) {
       ledFlash(1, 1, 0, 700);
       addText("+20!", p.x, p.y - 18, C_TROPHY);
       addScore(TROPHY_POINTS);
+      break;
+    case PK_COINBAG:
+      P().coins += COINBAG_COINS;
+      burst(p.x, p.y, C_GOLD, 18);
+      addText("+20 coins!", p.x, p.y - 18, C_GOLD);
+      playSound(SND(SND_BUY), 3);
+      ledFlash(1, 1, 0, 500);
       break;
     case PK_COIN:
       if (P().coins < 999999) P().coins++;
@@ -2300,10 +2586,13 @@ void updateReady(float dt) {
     if (c < 3) playSound(SND(SND_BEEP), 2);
     else if (c == 3) playSound(SND(SND_GO), 2);
   }
-  if (readyT > 0.55f * 4) state = ST_PLAY;
+  if (readyT > 0.55f * 4) state = bonusMode ? ST_BONUS : ST_PLAY;
 }
 
+void drawBonusReady();
+
 void drawReady() {
+  if (bonusMode) { drawBonusReady(); return; }
   drawGame();
   drawHUD(false);
   for (int x = 0; x < W; x += 16) fb.drawFastHLine(x, H / 2, 8, C_WHITE);
@@ -2392,6 +2681,8 @@ void updatePlay(float dt) {
     spawnObstacle(gap);
     spawnDist = gap;
   }
+  levelTime += dt;
+  updateClam(dt, dx);
 
   // forgiving hitbox (smaller than the drawing). The shrimp is extra tiny.
   int hx = PLAYER_X - 10, hy = (int)py - 6, hw = 26, hh = 13;
@@ -2425,6 +2716,7 @@ void updatePlay(float dt) {
   for (int i = 0; i < MAX_PK; i++) {
     Pickup& p = pks[i];
     if (!p.on) continue;
+    if (p.tt > 0) { p.x += p.vx * dt; p.y += p.vy * dt; p.tt -= dt; }   // thrown by the clam
     p.x -= dx;
     if (p.x < -20) { p.on = false; continue; }
     float ddx = p.x - (PLAYER_X + 4), ddy = p.y - py;
@@ -2498,6 +2790,8 @@ void drawPause() {
 // ============================================================
 //   SCREEN: level complete
 // ============================================================
+void startBonus();
+
 void updateClear(float dt) {
   overT += dt;
   if (overT < 3.0f && random(100) < 30)
@@ -2505,8 +2799,8 @@ void updateClear(float dt) {
   if (!tPressed) return;
   if (inRect(tx, ty, 49, 168, 70, 40)) {
     playSound(SND(SND_CLICK));
-    curLevel++;
-    startLevel();          // run score carries on
+    if (pendingBonus) startBonus();   // every 5th level: bonus round first!
+    else { curLevel++; startLevel(); }   // run score carries on
   } else if (inRect(tx, ty, 127, 168, 70, 40)) {
     playSound(SND(SND_CLICK));
     openShop(ST_CLEAR);    // spend coins between levels
@@ -2543,9 +2837,365 @@ void drawClear() {
   int tw = fb.textWidth(buf, 2);
   drawCoinIcon(W / 2 - tw / 2 - 9, yInfo + 15, 5);
   shadowText(buf, W / 2 + 3, yInfo + 15, 2, C_GOLD);
-  drawButton(49, 168, 70, 40, "Next", C_GREEN_BTN);
+  drawButton(49, 168, 70, 40, pendingBonus ? "Bonus!" : "Next", pendingBonus ? C_PURPLE_BTN : C_GREEN_BTN);
   drawButton(127, 168, 70, 40, "Shop", C_ORANGE_BTN);
   drawButton(205, 168, 70, 40, "Menu", C_BLUE_BTN);
+}
+
+// ============================================================
+//   BONUS ROUND (first-person, every 5th level)
+//   Things start far away in the middle of the screen and rush toward you.
+//   Everything is drawn bigger the closer it gets: that's the 3D trick.
+// ============================================================
+// Turns a spot in the water (x, y, distance z) into a spot on the screen.
+// f is how much bigger things look at that distance.
+bool bProject(float x, float y, float z, int& sx, int& sy, float& f) {
+  if (z < 0.05f) return false;
+  f = B_FOCAL / (z + 1.0f);
+  sx = (int)(B_CX + x * f);
+  sy = (int)(B_CY + y * f);
+  return true;
+}
+
+float bRadius(uint8_t type) {
+  switch (type) {
+    case BO_ROCK:  return 0.16f;
+    case BO_JELLY: return 0.14f;
+    case BO_FISH:  return 0.13f;
+    case BO_BAG:   return 0.10f;
+    default:       return 0.08f;
+  }
+}
+bool bIsObstacle(uint8_t type) { return type == BO_ROCK || type == BO_JELLY || type == BO_FISH; }
+
+void bSpawn(uint8_t type, float x, float y) {
+  for (int i = 0; i < MAX_BOBJ; i++) {
+    if (bobj[i].on) continue;
+    bobj[i] = {true, false, type, x, y, B_ZFAR, frand(0, 6.28f)};
+    return;
+  }
+}
+
+void startBonus() {
+  bonusMode = true;
+  pendingBonus = false;
+  clearWorld();
+  for (int i = 0; i < MAX_BOBJ; i++) bobj[i].on = false;
+  for (int i = 0; i < N_SPECKS; i++) bspeck[i] = {frand(-2.2f, 2.2f), frand(-1.4f, 1.4f), frand(0.2f, B_ZFAR)};
+  for (int i = 0; i < N_RINGS; i++) bRingZ[i] = (i + 1) * B_ZFAR / N_RINGS;
+  bonusT = BONUS_TIME;
+  bonusSpawnT = 0.6f;
+  bonusStun = 0;
+  bonusCoins = bonusPoints = 0;
+  bpx = 0; bpy = 0.5f;
+  goReady();
+}
+
+void endBonus() {
+  state = ST_BONUS_END;
+  overT = 0;
+  if (bonusCoins > P().bonusBest) P().bonusBest = bonusCoins;
+  saveProfile(cur);
+  checkStickers();
+  playSound(SND(SND_CLEAR), 4);
+  ledFlash(0, 1, 0, 800);
+  lockInput(900);
+}
+
+void bonusGrab(BObj& o, int sx, int sy) {
+  switch (o.type) {
+    case BO_COIN:
+      P().coins++; P().coinsCollected++; bonusCoins++;
+      burst(sx, sy, C_GOLD, 5);
+      playSound(SND(SND_COIN), 1);
+      break;
+    case BO_BAG:
+      P().coins += COINBAG_COINS; bonusCoins += COINBAG_COINS;
+      burst(sx, sy, C_GOLD, 16);
+      addText("+20 coins!", sx, sy - 20, C_GOLD);
+      playSound(SND(SND_BUY), 3);
+      ledFlash(1, 1, 0, 400);
+      break;
+    case BO_BUBBLE:
+      P().bubblesPopped++; runScore += BUBBLE_POINTS; bonusPoints += BUBBLE_POINTS;
+      burst(sx, sy, C_BUBBLE, 6);
+      playSound(SND(SND_BUBBLE), 1);
+      break;
+    case BO_WORM:
+      P().wormsEaten++; runScore += WORM_POINTS; bonusPoints += WORM_POINTS;
+      burst(sx, sy, C_WORM, 6);
+      addText("+5", sx, sy - 16, C_GOLD);
+      playSound(SND(SND_WORM), 1);
+      break;
+    default:   // bumped into something: no hearts lost, just drop a few coins
+      if (bonusStun > 0) break;
+      bonusStun = 1.0f;
+      {
+        int lose = bonusCoins < 3 ? bonusCoins : 3;
+        bonusCoins -= lose;
+        P().coins -= lose;
+        if (lose > 0) burst(sx, sy, C_GOLD, 8);
+      }
+      addText("Bonk!", sx, sy - 24, C_WHITE);
+      playSound(SND(SND_HIT), 3);
+      ledFlash(1, 0, 0, 300);
+      break;
+  }
+}
+
+void updateBonus(float dt) {
+  // steer: swim toward wherever you touch
+  if (tDown) {
+    float gx = constrain((tx - B_CX) / B_FOCAL, -0.95f, 0.95f);
+    float gy = constrain((ty - B_CY) / B_FOCAL, -0.62f, 0.62f);
+    float ddx = gx - bpx, ddy = gy - bpy;
+    float d = sqrtf(ddx * ddx + ddy * ddy), step = 2.4f * dt;
+    if (d <= step) { bpx = gx; bpy = gy; }
+    else           { bpx += ddx / d * step; bpy += ddy / d * step; }
+  }
+  if (bonusStun > 0) bonusStun -= dt;
+  bonusT -= dt;
+  if (bonusT <= 0) { endBonus(); return; }
+
+  float dz = B_SPEED * dt;
+  for (int i = 0; i < N_SPECKS; i++) {          // floating specks rush past
+    bspeck[i].z -= dz;
+    if (bspeck[i].z < 0.1f) bspeck[i] = {frand(-2.2f, 2.2f), frand(-1.4f, 1.4f), B_ZFAR};
+  }
+  for (int i = 0; i < N_RINGS; i++) {
+    bRingZ[i] -= dz;
+    if (bRingZ[i] < 0.1f) bRingZ[i] += B_ZFAR;
+  }
+
+  bonusSpawnT -= dt;
+  if (bonusSpawnT <= 0) {
+    bonusSpawnT = 0.22f;
+    float x = frand(-0.85f, 0.85f), y = frand(-0.55f, 0.55f);
+    int r = random(100);
+    if (r < 8) {                                 // a ring of coins
+      float cx = frand(-0.6f, 0.6f), cy = frand(-0.35f, 0.35f);
+      for (int k = 0; k < 6; k++) bSpawn(BO_COIN, cx + cosf(k * 1.047f) * 0.28f, cy + sinf(k * 1.047f) * 0.28f);
+    }
+    else if (r < 50) bSpawn(BO_COIN, x, y);
+    else if (r < 62) bSpawn(BO_BUBBLE, x, y);
+    else if (r < 72) bSpawn(BO_WORM, x, y);
+    else if (r < 74) bSpawn(BO_BAG, x, y);
+    else if (r < 83) bSpawn(BO_ROCK, x, y);
+    else if (r < 92) bSpawn(BO_JELLY, x, y);
+    else             bSpawn(BO_FISH, x, y);
+  }
+
+  for (int i = 0; i < MAX_BOBJ; i++) {
+    BObj& o = bobj[i];
+    if (!o.on) continue;
+    o.z -= dz;
+    if (o.type == BO_FISH)  o.x += sinf(gameT * 2 + o.phase) * 0.3f * dt;   // fish wiggle about
+    if (o.type == BO_JELLY) o.y += sinf(gameT * 3 + o.phase) * 0.25f * dt;  // jellyfish bob
+    if (!o.checked && o.z <= 0.25f) {            // it's reached you: did you touch it?
+      o.checked = true;
+      float ddx = o.x - bpx, ddy = o.y - bpy, rr = bRadius(o.type) + 0.12f;
+      if (ddx * ddx + ddy * ddy < rr * rr) {
+        bonusGrab(o, (int)(B_CX + o.x * B_FOCAL), (int)(B_CY + o.y * B_FOCAL));
+        if (!bIsObstacle(o.type)) o.on = false;
+      }
+    }
+    if (o.z < 0.1f) o.on = false;
+  }
+}
+
+void drawBObj(const BObj& o) {
+  int sx, sy;
+  float f;
+  if (!bProject(o.x, o.y, o.z, sx, sy, f)) return;
+  int r = (int)(bRadius(o.type) * f);
+  if (r < 1) r = 1;
+  switch (o.type) {
+    case BO_COIN: {
+      int w = (int)(fabsf(cosf(gameT * 4 + o.phase)) * r) + 1;
+      fb.fillEllipse(sx, sy, w, r, C_TROPHY_DARK);
+      if (w > 2) fb.fillEllipse(sx, sy, w - 1, r - 1, C_GOLD);
+      if (w > 3) fb.drawFastVLine(sx - w / 3, sy - r / 2, r, C_WHITE);
+      break;
+    }
+    case BO_BUBBLE:
+      fb.fillCircle(sx, sy, r, C_BUBBLE);
+      if (r > 3) fb.fillCircle(sx, sy, r - 2, RGB(100, 195, 240));
+      if (r > 3) fb.fillCircle(sx - r / 3, sy - r / 3, r / 4 + 1, C_WHITE);
+      break;
+    case BO_WORM:
+      for (int k = 0; k < 5; k++)
+        fb.fillCircle(sx - r + k * r / 2, sy + (int)(sinf(gameT * 8 + o.phase + k) * r / 4), r / 3 + 1, (k % 2) ? C_WORM_DARK : C_WORM);
+      break;
+    case BO_BAG:
+      fb.fillCircle(sx, sy + r / 4, r, RGB(170, 120, 60));
+      fb.fillTriangle(sx - r / 2, sy - r, sx + r / 2, sy - r, sx, sy - r / 3, RGB(140, 95, 45));
+      if (r > 4) drawCoinIcon(sx, sy + r / 4, r / 2);
+      break;
+    case BO_ROCK:
+      fb.fillCircle(sx, sy, r, C_ROCK);
+      fb.fillCircle(sx - r / 2, sy - r / 3, r * 6 / 10, C_ROCK);
+      fb.fillCircle(sx + r / 2, sy + r / 4, r / 2, C_ROCK_DARK);
+      if (r > 3) fb.fillCircle(sx - r / 2, sy - r / 2, r / 4, C_ROCK_LIGHT);
+      break;
+    case BO_JELLY: {
+      uint16_t jc = RGB(255, 150, 210);
+      for (int k = -2; k <= 2; k++) {            // wavy tentacles
+        int lx = sx + k * r / 3;
+        int ly = sy + r + (int)(sinf(gameT * 6 + k + o.phase) * r / 5);
+        fb.drawLine(lx, sy, lx + (int)(sinf(gameT * 4 + k) * r / 4), ly, RGB(230, 120, 190));
+      }
+      fillTopHalfCircle(sx, sy, r, jc);
+      fb.fillRect(sx - r, sy, 2 * r + 1, r / 4 + 1, RGB(230, 120, 190));
+      if (r > 5) {
+        fb.fillCircle(sx - r / 3, sy - r / 3, r / 6 + 1, C_BLACK);
+        fb.fillCircle(sx + r / 3, sy - r / 3, r / 6 + 1, C_BLACK);
+      }
+      break;
+    }
+    default: {   // fish swimming straight at you
+      uint16_t fc = FISH_COLORS[((int)(o.phase * 10)) % 3];
+      int fw = (int)(sinf(gameT * 12 + o.phase) * r / 4);
+      fb.fillTriangle(sx - r, sy, sx - r - r / 2, sy - r / 2 + fw, sx - r - r / 2, sy + r / 2 + fw, fc);
+      fb.fillTriangle(sx + r, sy, sx + r + r / 2, sy - r / 2 - fw, sx + r + r / 2, sy + r / 2 - fw, fc);
+      fb.fillCircle(sx, sy, r, fc);
+      if (r > 4) {
+        fb.fillCircle(sx - r / 3, sy - r / 4, r / 4 + 1, C_WHITE);
+        fb.fillCircle(sx + r / 3, sy - r / 4, r / 4 + 1, C_WHITE);
+        fb.fillCircle(sx - r / 3, sy - r / 4, r / 8 + 1, C_BLACK);
+        fb.fillCircle(sx + r / 3, sy - r / 4, r / 8 + 1, C_BLACK);
+        fb.fillCircle(sx, sy + r / 3, r / 6 + 1, darker565(fc));   // little "o" mouth
+      }
+      break;
+    }
+  }
+}
+
+void drawBonusScene() {
+  const Theme& T = THEMES[currentTheme()];
+  float fFar = B_FOCAL / (B_ZFAR + 1.0f);
+  int floorTop = (int)(B_CY + B_FLOOR * fFar);
+
+  // water fading darker toward the floor, with a glow far away
+  for (int i = 0; i < 6; i++) {
+    int y0 = i * floorTop / 6, y1 = (i + 1) * floorTop / 6;
+    fb.fillRect(0, y0, W, y1 - y0, T.water[i]);
+  }
+  fb.fillEllipse((int)B_CX, floorTop - 4, 46, 16, lerp565(T.water[3], C_WHITE, 0.25f));
+  fb.fillEllipse((int)B_CX, floorTop - 4, 24, 8, lerp565(T.water[3], C_WHITE, 0.45f));
+
+  // light rings rushing past
+  for (int i = 0; i < N_RINGS; i++) {
+    float f = B_FOCAL / (bRingZ[i] + 1.0f);
+    int rr = (int)(1.3f * f);
+    uint16_t rc = lerp565(T.water[2], C_WHITE, 0.2f);
+    fb.drawCircle((int)B_CX, (int)B_CY, rr, rc);
+    if (f > 50) fb.drawCircle((int)B_CX, (int)B_CY, rr + 1, rc);
+  }
+
+  // the sea floor, stretching away into the distance
+  fb.fillRect(0, floorTop, W, H - floorTop, T.sand);
+  for (int i = 0; i < N_RINGS; i++) {
+    float f = B_FOCAL / (bRingZ[i] + 1.0f);
+    int y = (int)(B_CY + B_FLOOR * f);
+    if (y < H) fb.fillRect(0, y, W, f > 60 ? 3 : (f > 25 ? 2 : 1), T.sandDark);
+  }
+  for (int k = -3; k <= 3; k++)
+    fb.drawLine((int)(B_CX + k * 0.6f * fFar), floorTop, (int)(B_CX + k * 0.6f * (H - B_CY) / B_FLOOR), H, T.sandDark);
+
+  // specks
+  for (int i = 0; i < N_SPECKS; i++) {
+    int sx, sy;
+    float f;
+    if (!bProject(bspeck[i].x, bspeck[i].y, bspeck[i].z, sx, sy, f)) continue;
+    if (sy >= floorTop && bspeck[i].y > B_FLOOR) continue;
+    uint16_t c = lerp565(T.water[1], C_WHITE, 0.6f);
+    if (f > 50) fb.fillCircle(sx, sy, 1, c);
+    else        fb.drawPixel(sx, sy, c);
+  }
+
+  // things coming at you, far ones first
+  int order[MAX_BOBJ], n = 0;
+  for (int i = 0; i < MAX_BOBJ; i++) if (bobj[i].on) order[n++] = i;
+  for (int a = 1; a < n; a++) {
+    int v = order[a], b = a - 1;
+    while (b >= 0 && bobj[order[b]].z < bobj[v].z) { order[b + 1] = order[b]; b--; }
+    order[b + 1] = v;
+  }
+  for (int k = 0; k < n; k++) drawBObj(bobj[order[k]]);
+
+  // you, seen from behind (with a shadow on the sea floor)
+  int px = (int)(B_CX + bpx * B_FOCAL), pyS = (int)(B_CY + bpy * B_FOCAL);
+  fb.fillEllipse(px, H - 4, 18, 3, T.sandDark);
+  bool blinkOff = bonusStun > 0 && ((int)(bonusStun * 12)) % 2 == 0;
+  if (!blinkOff) drawCharacterBack(playerChar(), currentSkin(), profHat(P()), px, pyS, 2, gameT);
+}
+
+void drawBonusHUD() {
+  char buf[16];
+  drawCoinIcon(14, 14, 7);
+  snprintf(buf, sizeof(buf), "%d", bonusCoins);
+  textAt(buf, 26, 15, 4, C_GOLD, ML_DATUM);
+  int secs = (int)ceilf(bonusT > 0 ? bonusT : 0);
+  snprintf(buf, sizeof(buf), "%d", secs);
+  shadowText(buf, W / 2, 16, 4, secs <= 5 ? C_HEART : C_WHITE);
+  textAt("BONUS", W / 2, 34, 2, C_GOLD, MC_DATUM);
+  snprintf(buf, sizeof(buf), "%d", runScore);
+  textAt(buf, W - 8, 14, 2, C_GOLD, MR_DATUM);
+}
+
+void drawBonusReady() {
+  drawBonusScene();
+  drawBonusHUD();
+  shadowText("Bonus Round!", W / 2, 54, 4, C_GOLD);
+  shadowText("Touch where you want to swim!", W / 2, 76, 2, C_WHITE);
+  shadowText("Grab coins, dodge rocks", W / 2, 92, 2, C_WHITE);
+  char buf[8];
+  if (readyCount < 3) {
+    snprintf(buf, sizeof(buf), "%d", 3 - readyCount);
+    fb.setTextDatum(MC_DATUM);
+    fb.setTextColor(C_BLACK);
+    fb.drawString(buf, 162, 116, 7);
+    fb.setTextColor(C_GOLD);
+    fb.drawString(buf, 160, 114, 7);
+  } else {
+    shadowText("Go!", 160, 114, 4, C_GOLD);
+  }
+}
+
+void updateBonusEnd(float dt) {
+  overT += dt;
+  if (overT < 3.0f && random(100) < 30)
+    burst(frand(50, 270), frand(40, 110), pastelHue(frand(0, 1)), 5);   // confetti!
+  if (!tPressed) return;
+  if (inRect(tx, ty, 55, 165, 100, 40)) {
+    playSound(SND(SND_CLICK));
+    curLevel++;
+    startLevel();
+  } else if (inRect(tx, ty, 165, 165, 100, 40)) {
+    playSound(SND(SND_CLICK));
+    endRun();
+    state = ST_TITLE;
+    lockInput(250);
+  }
+}
+
+void drawBonusEnd() {
+  drawBonusScene();
+  drawPanel(40, 30, 240, 185);
+  shadowText("Bonus Complete!", W / 2, 50, 4, C_GOLD);
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d", bonusCoins);
+  int tw = fb.textWidth(buf, 7);
+  drawCoinIcon(W / 2 - tw / 2 - 18, 92, 12);
+  fb.setTextDatum(MC_DATUM);
+  fb.setTextColor(C_GOLD);
+  fb.drawString(buf, W / 2 + 8, 92, 7);
+  snprintf(buf, sizeof(buf), "coins!   +%d points", bonusPoints);
+  shadowText(buf, W / 2, 126, 2, C_WHITE);
+  snprintf(buf, sizeof(buf), "Best bonus: %d coins", P().bonusBest);
+  shadowText(buf, W / 2, 146, 2, C_GOLD);
+  drawButton(55, 165, 100, 40, "Next", C_GREEN_BTN);
+  drawButton(165, 165, 100, 40, "Menu", C_BLUE_BTN);
 }
 
 // ============================================================
@@ -2623,7 +3273,7 @@ void drawSettings() {
 // ============================================================
 //   SCREEN: stickers
 // ============================================================
-void stickerCell(int i, int& cx, int& cy) { cx = 28 + (i % 7) * 44; cy = 62 + (i / 7) * 50; }
+void stickerCell(int i, int& cx, int& cy) { cx = 23 + (i % 8) * 39; cy = 62 + (i / 8) * 46; }
 
 void updateStickers(float dt) {
   scrollX += 20 * dt;
@@ -2631,7 +3281,7 @@ void updateStickers(float dt) {
   for (int i = 0; i < N_STICKERS; i++) {
     int cx, cy;
     stickerCell(i, cx, cy);
-    if (inRect(tx, ty, cx - 22, cy - 24, 44, 48)) { stickerSel = i; playSound(SND(SND_CLICK)); return; }
+    if (inRect(tx, ty, cx - 19, cy - 22, 39, 44)) { stickerSel = i; playSound(SND(SND_CLICK)); return; }
   }
   if (inRect(tx, ty, 110, 196, 100, 38)) {
     playSound(SND(SND_CLICK));
@@ -2649,8 +3299,8 @@ void drawStickers() {
   for (int i = 0; i < N_STICKERS; i++) {
     int cx, cy;
     stickerCell(i, cx, cy);
-    if (i == stickerSel) { fb.drawCircle(cx, cy, 21, C_GOLD); fb.drawCircle(cx, cy, 22, C_GOLD); }
-    drawStickerBadge(cx, cy, 18, i, stickerEarned(i));
+    if (i == stickerSel) { fb.drawCircle(cx, cy, 19, C_GOLD); fb.drawCircle(cx, cy, 20, C_GOLD); }
+    drawStickerBadge(cx, cy, 16, i, stickerEarned(i));
   }
   const Sticker& st = STICKERS[stickerSel];
   shadowText(st.name, W / 2, 146, 4, C_WHITE);
@@ -2720,7 +3370,7 @@ void shopAction(int btn) {
     case 1: {  // shop skins
       int si = SHOP_SKIN_LIST[idx];
       if (!skinUnlocked(si)) {
-        if (tryBuy(1, SKINS[si].price)) { p.skinsOwned |= (1UL << (si - FIRST_SHOP_SKIN)); p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); shopSay("So shiny!"); }
+        if (tryBuy(1, SKINS[si].price)) { p.skinsOwned |= (1UL << skinShopBit(si)); p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); shopSay("So shiny!"); }
       } else {
         p.skin = si; p.character = CH_AXOLOTL; saveProfile(cur); playSound(SND(SND_SELECT));
       }
@@ -3013,6 +3663,8 @@ void drawFrame() {
     case ST_STICKERS: drawStickers(); break;
     case ST_SETTINGS: drawSettings(); break;
     case ST_REVIVE:   drawRevive();   break;
+    case ST_BONUS:    drawBonusScene(); drawBonusHUD(); break;
+    case ST_BONUS_END: drawBonusEnd(); break;
     case ST_READY:    drawReady();    break;
     case ST_PLAY:     drawGame(); drawHUD(true); break;
     case ST_PAUSE:    drawPause();    break;
@@ -3042,7 +3694,7 @@ void loop() {
   ledUpdate(now);
 
   // dim the screen on menus after a while; the first touch just wakes it
-  if (tDown || state == ST_PLAY || state == ST_READY) lastActivityMs = now;
+  if (tDown || state == ST_PLAY || state == ST_READY || state == ST_BONUS) lastActivityMs = now;
   if (dimmed && tDown) {
     dimmed = false;
     ledcWrite(BL_CH, BRIGHT_LEVELS[brightness]);
@@ -3066,6 +3718,8 @@ void loop() {
     case ST_STICKERS: updateStickers(dt); break;
     case ST_SETTINGS: updateSettings(dt); break;
     case ST_REVIVE:   updateRevive();     break;
+    case ST_BONUS:    updateBonus(dt);    break;
+    case ST_BONUS_END: updateBonusEnd(dt); break;
     case ST_READY:    updateReady(dt);    break;
     case ST_PLAY:     updatePlay(dt);     break;
     case ST_PAUSE:    updatePause();      break;
@@ -3074,7 +3728,7 @@ void loop() {
   }
 
   updateStickerBanner(dt);
-  musicWanted = (state == ST_PLAY);
+  musicWanted = (state == ST_PLAY || state == ST_BONUS);
   float worldSpd = 0;
   if (state == ST_PLAY) worldSpd = speed;
   else if (state == ST_TITLE || state == ST_PROFILES) worldSpd = 35;

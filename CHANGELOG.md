@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.4
+- **First-person bonus rounds** after every 5th level: 30 seconds swimming into the screen, seen from behind, steering in any direction by touch
+- Back-view drawings of the axolotl (with every skin, effect and hat) and all four friends
+- Bonus round treats: coins, coin rings, bubbles, worms and coin bags. Obstacles: rocks, jellyfish and fish (bumps cost 3 coins, never hearts)
+- New sticker: **Bonus Champ** (grab 40 coins in one bonus round)
+- Saved players keep all their progress
+
+## v1.3
+- Tangerine (65 coins) and Slate (70 coins) can now be bought in the Shop, or still unlocked at levels 17 and 18
+- New shop skins: **Charcoal** (deep dark gray, 70 coins) and **Pastel Dream** (soft pastel rainbow with sparkles, 200 coins, the most expensive)
+- The Shop's skin list is now sorted cheapest first
+- **The helpful clam** visits about one level in three, says something encouraging, and throws a bag of 20 coins or a heart
+- Saved players keep all their progress
+
 ## v1.2
 - The pastel collection (Blossom, Peach, Butter, Pistachio, Seafoam, Baby Blue and Lilac) and Dusky can now be bought in the Shop for 75–150 coins, or still unlocked by levels
 - Background music that pauses for sound effects, with an on/off switch in Settings and the pause menu

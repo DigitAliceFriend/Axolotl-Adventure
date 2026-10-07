@@ -1,6 +1,6 @@
 # 🦎 Axolotl Adventure
 
-**by AliceFriend** · version 1.2 (see [CHANGELOG.md](CHANGELOG.md))
+**by AliceFriend** · version 1.4 (see [CHANGELOG.md](CHANGELOG.md))
 
 A cheerful underwater side-scroller for kids, made for the ESP32 **"Cheap Yellow Display"** (CYD). Guide your axolotl through the water, dodge rocks, seaweed and fish, eat worms, pop bubbles, and swim through level after level to unlock new axolotl skins.
 
@@ -27,12 +27,22 @@ Dodge 🪨 rocks on the sea floor and hanging from above, 🌿 swaying seaweed, 
 | ❤️ Heart | Gives back a life |
 | 🪙 Coin | 1 coin to spend in the Shop (no points) |
 
+## Bonus rounds
+
+After every 5th level (5, 10, 15, ...), the **Next** button turns into **Bonus!** and you get a 30-second **first-person bonus round**. You see your axolotl (or friend) from behind as you swim into the screen, and everything rushes toward you from far away.
+
+- **Touch anywhere** and your character swims toward that spot, in any direction.
+- Grab **coins** (sometimes in rings), **bubbles**, **worms** and the odd **bag of 20 coins**.
+- Dodge **rocks**, **jellyfish** and **fish**. Bumping one never costs hearts: you just wobble and drop 3 of the coins you've grabbed.
+- Coins go straight into your wallet, and points add to your score.
+
 ## Coins and the Shop
 
 Collect coins floating in the water, and earn a coin bonus for every level you finish (10 coins plus 5 for each level number, so level 3 gives 25). Spend them in the **Shop**, which opens from the main menu or from the level-complete screen. The Shop isn't available while paused.
 
 Buying takes two taps, so coins aren't spent by accident.
 
+- **The helpful clam** visits about one level in three. It sits on the sea floor, opens up, says something encouraging like "You can do it!", and tosses you a **bag of 20 coins** or, if you've lost a heart, sometimes a **heart**.
 - **Perfect levels:** finish a level without getting bumped for 10 bonus coins.
 - **Revive:** when you run out of hearts, you can pay 25 coins to keep swimming with 2 hearts. You can do this once per level.
 
@@ -56,13 +66,14 @@ Earn stickers by reaching goals. Each one pays coins:
 | Best Friends | Unlock a friend to play as | 20 |
 | Super Swimmer | Score 500 in one game | 30 |
 | Legend | Finish level 26 | 100 |
+| Bonus Champ | Grab 40 coins in a bonus round | 30 |
 
 Tap a sticker on the Stickers screen to see how close you are.
 
 | Tab | What you can buy |
 |---|---|
 | **Hats** | 18 hats: beanies in red, orange, yellow, green, blue, purple and pastel, plus a pink bow, ball caps, party hats (plain, sparkly, flashy and rainbow), a top hat, a **Santa hat**, a wizard hat and a gold crown. Tap a hat you own to wear it or take it off. |
-| **Skins** | 8 special axolotl skins with effects (Glitter, Frosty, Cotton Candy, Glow, Disco, Lava, Galaxy and Golden), plus the pastel collection and Dusky, which you can buy early instead of waiting for their level |
+| **Skins** | 10 shop-only skins (Glitter, Frosty, Cotton Candy, Glow, Disco, Lava, Galaxy, Golden, Charcoal and Pastel Dream), plus Tangerine, Slate, the pastel collection and Dusky, which you can buy early instead of waiting for their level. Listed cheapest first. |
 | **Power** | **Shields** (10 coins). In a game, tap the shield button next to pause to be safe from bumps for 5 seconds. Carry up to 5. |
 | **Friends** | Hire a friend as a **helper** for the next level (15 coins). It swims in circles around you and grabs any treats and coins it touches. Or **unlock** a friend for good and play as them! |
 
@@ -108,6 +119,7 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 - **Five underwater places** that take turns level by level: Sunny Lagoon, Coral Reef, Sunset Cove, Kelp Forest and Deep Sea
 - **Pause menu.** Change your skin or sound volume in the middle of a game, then keep swimming. Quitting needs two taps, so little fingers don't end a game by accident.
 - **Three speeds:** Easy (5 hearts), Normal and Zoom!
+- **First-person bonus rounds** every 5 levels
 - **Kid-friendly design:** hearts instead of instant game over, forgiving hitboxes, a short safe time after each bump, and lots of cheering
 - **Sound effects** with Off / Quiet / Loud settings, and **background music** that you can turn on or off
 - **Settings** for speed, sound, music and screen brightness
@@ -150,10 +162,12 @@ Each level has a points goal. Reach it to finish the level and unlock a new skin
 | Lilac (pastel purple) | Finish level 25 |
 | Dusky (fades between blue, pink and purple) | Finish level 26 |
 
-The pastel collection and Dusky can also be bought early in the Shop:
+Some level skins can also be bought early in the Shop:
 
 | Skin | Price |
 |---|---|
+| Tangerine | 65 |
+| Slate | 70 |
 | Blossom | 75 |
 | Peach | 80 |
 | Butter | 85 |
@@ -163,7 +177,7 @@ The pastel collection and Dusky can also be bought early in the Shop:
 | Lilac | 110 |
 | Dusky | 150 |
 
-**Shop skins:** Glitter (sparkly pink), Frosty (sparkly ice blue), Cotton Candy (pastel pink and blue), Glow (glowing green), Disco (flashes pink and blue), Lava (glowing orange and red), Galaxy (twinkling stars) and Golden (sparkly gold). Flashing effects swap colours less than twice a second, so they stay gentle on the eyes.
+**Shop skins:** Charcoal (deep dark gray, 70), Pastel Dream (a very soft pastel rainbow with sparkles, the most expensive at 200), Glitter (sparkly pink), Frosty (sparkly ice blue), Cotton Candy (pastel pink and blue), Glow (glowing green), Disco (flashes pink and blue), Lava (glowing orange and red), Galaxy (twinkling stars) and Golden (sparkly gold). Flashing effects swap colours less than twice a second, so they stay gentle on the eyes.
 
 ## Menus
 
@@ -215,6 +229,8 @@ Most settings are near the top of `AxolotlAdventure.ino`:
 - `TROPHY_MIN_WORMS` and `TROPHY_MAX_WORMS` control how often golden trophies appear
 - `levelCoinBonus()`, `PERFECT_BONUS`, `REVIVE_PRICE`, `SHIELD_PRICE`, `HELPER_PRICE` and `MAX_SHIELDS` set coin rewards and prices
 - `STICKERS[]` lists the stickers, their goals and rewards
+- `BONUS_EVERY`, `BONUS_TIME` and `B_SPEED` control how often bonus rounds come, how long they last and how fast things fly at you
+- `CLAM_CHANCE` (how often the clam visits), `COINBAG_COINS` and `CLAM_PHRASES[]` (what it says) control the helpful clam
 - `MUSIC[]` is the background tune, written as `{frequency in Hz, length in ms}` notes
 - `HATS[]`, the shop part of `SKINS[]` and `FRIENDS[]` list everything in the Shop, with prices. Add new items to the **end** of each list so saved players keep what they've bought.
 - `FULL_COLOUR` switches between 65,000 colours (`1`) and 256 colours (`0`)
